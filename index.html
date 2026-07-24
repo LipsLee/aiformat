@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AIFormat — AI回答一键格式化</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
+  background:#e5e3de;color:#1a1a1a;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+
+#topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  height:40px;padding:0 16px;background:#fff;
+  border-bottom:1px solid #ddd;flex-shrink:0;z-index:10;
+}
+#topbar .logo{font-size:15px;font-weight:700;letter-spacing:-.3px}
+#topbar .acts{display:flex;align-items:center;gap:10px}
+#topbar button{
+  font-size:12px;padding:4px 12px;border:1px solid #ddd;border-radius:5px;
+  background:#fff;cursor:pointer;font-family:inherit;
+}
+#topbar button:hover{background:#f4f3f0}
+#topbar .tgl{display:flex;align-items:center;gap:4px;font-size:12px;color:#777;cursor:pointer;user-select:none}
+#topbar .tgl input{accent-color:#2563eb;margin:0}
+
+/* clerk overrides */
+.cl-userButtonBox{width:28px;height:28px}
+.cl-signInButton,.cl-signUpButton{font-size:12px!important;padding:4px 12px!important;height:auto!important}
+
+#main{display:flex;flex:1;min-height:0}
+
+#left{
+  width:50%;display:flex;flex-direction:column;
+  background:#fafaf8;border-right:1px solid #ddd;
+}
+#inputArea{
+  flex:1;width:100%;padding:20px;border:none;resize:none;outline:none;
+  font-family:"SF Mono","Cascadia Code",Consolas,monospace;
+  font-size:14px;line-height:1.7;color:#222;background:none;
+}
+#inputArea::placeholder{color:#c5bfb8}
+
+#right{
+  width:50%;display:flex;flex-direction:column;
+  background:#d9d6d0;overflow:hidden;
+}
+
+#stylebar{
+  display:flex;align-items:center;gap:12px;
+  height:38px;padding:0 14px;background:#fff;
+  border-bottom:1px solid #e0ddd7;flex-shrink:0;
+}
+#stylebar select{
+  font-size:12px;padding:4px 24px 4px 8px;border:1px solid #ddd;border-radius:5px;
+  background:#fafaf8;font-family:inherit;cursor:pointer;
+  appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg width='8' height='5' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23999'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 8px center;
+}
+#stylebar .grp{display:flex;align-items:center;gap:4px;font-size:11px;color:#999}
+#stylebar .grp input[type=range]{width:52px;height:3px;accent-color:#1a1a1a;cursor:pointer}
+#stylebar .grp .v{font-size:11px;color:#555;min-width:14px}
+
+#stage{
+  flex:1;overflow:auto;
+  padding:28px 32px 72px;
+  display:flex;justify-content:center;
+}
+#preview{
+  width:100%;max-width:720px;
+  background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.08);
+  padding:48px 56px;
+  align-self:flex-start;
+}
+#preview .hint{color:#c5bfb8;text-align:center;padding:100px 0;line-height:1.8}
+
+#floatbar{
+  position:fixed;bottom:16px;left:50%;transform:translateX(-50%);
+  display:flex;gap:0;padding:4px;width:320px;
+  background:#1a1a1a;border-radius:10px;
+  box-shadow:0 4px 20px rgba(0,0,0,.25);
+  z-index:50;opacity:0;pointer-events:none;transition:opacity .2s;
+}
+#floatbar.on{opacity:1;pointer-events:auto}
+#floatbar button{
+  flex:1;font-size:13px;font-weight:500;padding:8px 0;
+  border-radius:7px;cursor:pointer;font-family:inherit;border:none;
+  text-align:center;margin:0 1px;
+}
+#floatbar .pri{background:#fff;color:#1a1a1a}
+#floatbar .pri:hover{background:#e8e8e8}
+#floatbar button:not(.pri){background:transparent;color:#aaa}
+#floatbar button:not(.pri):hover{color:#fff}
+
+#toast{
+  position:fixed;bottom:72px;left:50%;transform:translateX(-50%);
+  padding:8px 18px;background:#1a1a1a;color:#fff;
+  border-radius:7px;font-size:13px;
+  opacity:0;pointer-events:none;transition:opacity .2s;z-index:60;
+}
+#toast.on{opacity:1}
+
+/* auth modal */
+#auth-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:90;
+  display:flex;align-items:center;justify-content:center;
+  opacity:0;pointer-events:none;transition:opacity .2s;
+}
+#auth-overlay.on{opacity:1;pointer-events:auto}
+#auth-box{
+  background:#fff;border-radius:12px;padding:32px;width:380px;max-width:90vw;
+  text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.2);
+}
+#auth-box h2{font-size:18px;margin-bottom:8px}
+#auth-box p{font-size:13px;color:#888;margin-bottom:24px;line-height:1.6}
+#auth-box button{
+  font-size:13px;font-weight:500;padding:10px 28px;border-radius:7px;
+  cursor:pointer;font-family:inherit;border:none;
+  background:#1a1a1a;color:#fff;margin:4px;
+}
+#auth-box button:hover{background:#333}
+#auth-box .close{
+  position:absolute;top:8px;right:12px;
+  font-size:18px;cursor:pointer;color:#999;background:none;border:none;
+}
+#auth-box .close:hover{color:#333}
+
+@media print{
+  html,body{overflow:visible!important;height:auto!important;background:#fff!important}
+  #topbar,#left,#stylebar,#floatbar,#toast,#auth-overlay{display:none!important}
+  #main{display:block!important;overflow:visible!important}
+  #right{width:100%!important;background:#fff!important;overflow:visible!important}
+  #stage{overflow:visible!important;padding:0!important;display:block!important}
+  #preview{max-width:100%!important;box-shadow:none!important;padding:0!important}
+}
+@media(max-width:768px){
+  #main{flex-direction:column}
+  #left,#right{width:100%;height:50%}
+  #preview{padding:32px 24px}
+}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <span class="logo">AIFormat</span>
+  <div class="acts">
+    <label class="tgl"><input type="checkbox" id="chkClean" />清除AI用语</label>
+    <button id="btnSample">示例</button>
+    <button id="btnClear">清空</button>
+    <button id="btnLogin" style="background:#1a1a1a;color:#fff;border-color:#1a1a1a;">登录</button>
+  </div>
+</div>
+
+<div id="main">
+  <div id="left">
+    <textarea id="inputArea" placeholder="粘贴 AI 回答到这里..."></textarea>
+  </div>
+  <div id="right">
+    <div id="stylebar">
+      <select id="fontFamily">
+        <option value="'Noto Serif SC','Songti SC',serif">宋体</option>
+        <option value="system-ui,'PingFang SC','Microsoft YaHei',sans-serif">黑体</option>
+        <option value="'KaiTi','STKaiti',serif">楷体</option>
+      </select>
+      <label class="grp">字号<input type="range" id="fontSize" min="12" max="24" value="16" /><span class="v" id="fontSizeVal">16</span></label>
+      <label class="grp">行距<input type="range" id="lineHeight" min="1.4" max="2.6" step="0.1" value="1.8" /><span class="v" id="lineHeightVal">1.8</span></label>
+      <label class="grp">段距<input type="range" id="paraSpacing" min="0" max="24" value="8" /><span class="v" id="paraSpacingVal">8</span></label>
+    </div>
+    <div id="stage">
+      <div id="preview"><span class="hint">在左侧粘贴 AI 回答<br/>自动格式化并显示预览</span></div>
+    </div>
+  </div>
+</div>
+
+<div id="floatbar">
+  <button id="btnCopy" class="pri">复制格式</button>
+  <button id="btnCopyPlain">纯文本</button>
+  <button id="btnDocx">docx</button>
+  <button id="btnPdf">PDF</button>
+</div>
+
+<div id="toast"></div>
+
+<div id="auth-overlay">
+  <div id="auth-box">
+    <button class="close" id="authClose">&times;</button>
+    <h2 id="authTitle">登录 AIFormat</h2>
+    <p id="authDesc">登录后可解锁 Pro 功能</p>
+    <button id="authGoogle"><span style="font-size:16px">G</span>&nbsp; Google 登录</button>
+    <button id="authGitHub"><span style="font-size:16px">&#9906;</span>&nbsp; GitHub 登录</button>
+    <p style="font-size:11px;color:#bbb;margin-top:12px;">还将支持更多登录方式</p>
+  </div>
+</div>
+
+<script type="module">
+import { parseMarkdown } from './src/parser.ts'
+import { cleanAIPhrases } from './src/cleaner.ts'
+import { getStyleConfig } from './src/style.ts'
+import { copyRichText, copyPlainText, downloadDocx } from './src/export.ts'
+import { Clerk } from '@clerk/clerk-js'
+
+// ============ CLERK AUTH ============
+// 替换为你的 Clerk Publishable Key（在 clerk.com 创建应用后获取）
+const CLERK_KEY = 'pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+
+const clerk = new Clerk(CLERK_KEY)
+
+async function initClerk() {
+  try {
+    await clerk.load()
+    if (clerk.user) {
+      showLoggedIn(clerk.user)
+    } else {
+      showLoggedOut()
+    }
+    clerk.addListener(({ user }) => {
+      if (user) showLoggedIn(user)
+      else showLoggedOut()
+    })
+  } catch (e) {
+    console.warn('Clerk 未配置，跳过登录功能。请替换 CLERK_KEY。')
+    document.getElementById('btnLogin').style.display = 'none'
+  }
+}
+
+const btnLogin = document.getElementById('btnLogin')
+const authOverlay = document.getElementById('auth-overlay')
+
+function showLoggedIn(user) {
+  btnLogin.textContent = user.fullName || user.primaryEmailAddress?.emailAddress || '已登录'
+  btnLogin.style.background = '#fff'
+  btnLogin.style.color = '#1a1a1a'
+  btnLogin.style.borderColor = '#ddd'
+  btnLogin.onclick = () => clerk.openUserProfile()
+  authOverlay.classList.remove('on')
+}
+
+function showLoggedOut() {
+  btnLogin.textContent = '登录'
+  btnLogin.style.background = '#1a1a1a'
+  btnLogin.style.color = '#fff'
+  btnLogin.style.borderColor = '#1a1a1a'
+  btnLogin.onclick = () => { authOverlay.classList.add('on') }
+}
+
+document.getElementById('authClose').addEventListener('click', () => {
+  authOverlay.classList.remove('on')
+})
+authOverlay.addEventListener('click', (e) => {
+  if (e.target === authOverlay) authOverlay.classList.remove('on')
+})
+document.getElementById('authGoogle').addEventListener('click', async () => {
+  await clerk.authenticate({ strategy: 'oauth_google', redirectUrl: window.location.href })
+})
+document.getElementById('authGitHub').addEventListener('click', async () => {
+  await clerk.authenticate({ strategy: 'oauth_github', redirectUrl: window.location.href })
+})
+
+initClerk()
+
+// ============ APP LOGIC ============
+const $ = id => document.getElementById(id)
+
+const inputArea   = $('inputArea')
+const previewArea = $('preview')
+const floatBar    = $('floatbar')
+const chkClean    = $('chkClean')
+const toastEl     = $('toast')
+
+let currentHtml = ''
+
+function toast(msg) {
+  toastEl.textContent = msg
+  toastEl.classList.add('on')
+  setTimeout(() => toastEl.classList.remove('on'), 1800)
+}
+
+function doFormat() {
+  const raw = inputArea.value
+  if (!raw.trim()) {
+    previewArea.innerHTML = '<span class="hint">在左侧粘贴 AI 回答<br/>自动格式化并显示预览</span>'
+    currentHtml = ''
+    floatBar.classList.remove('on')
+    return
+  }
+  const src = chkClean.checked ? cleanAIPhrases(raw) : raw
+  currentHtml = parseMarkdown(src, getStyleConfig())
+  previewArea.innerHTML = currentHtml
+  floatBar.classList.add('on')
+}
+
+let timer
+inputArea.addEventListener('input', () => {
+  clearTimeout(timer)
+  timer = setTimeout(doFormat, 250)
+})
+
+$('btnSample').addEventListener('click', () => { inputArea.value = SAMPLE; doFormat() })
+$('btnClear').addEventListener('click', () => {
+  inputArea.value = ''
+  previewArea.innerHTML = '<span class="hint">在左侧粘贴 AI 回答<br/>自动格式化并显示预览</span>'
+  currentHtml = ''
+  floatBar.classList.remove('on')
+})
+chkClean.addEventListener('change', () => { if (currentHtml) doFormat() })
+
+$('btnCopy').addEventListener('click', () => {
+  if (!currentHtml) return toast('请先粘贴内容')
+  copyRichText(currentHtml)
+  toast('已复制，可粘贴到 Word / 飞书 / 微信')
+})
+$('btnCopyPlain').addEventListener('click', () => {
+  const text = previewArea.textContent?.trim()
+  if (!text) return toast('请先粘贴内容')
+  copyPlainText(text)
+  toast('已复制纯文本')
+})
+$('btnDocx').addEventListener('click', () => {
+  if (!currentHtml) return toast('请先粘贴内容')
+  downloadDocx(currentHtml, 'AIFormat-输出.docx')
+  toast('DOCX 下载中...')
+})
+$('btnPdf').addEventListener('click', () => {
+  if (!currentHtml) return toast('请先粘贴内容')
+  window.print()
+})
+
+const sliders = ['fontSize','lineHeight','paraSpacing']
+sliders.forEach(id => {
+  $(id).addEventListener('input', () => {
+    const el = document.getElementById(id + 'Val')
+    if (el) el.textContent = $(id).value
+    if (currentHtml) doFormat()
+  })
+})
+$('fontFamily').addEventListener('change', () => { if (currentHtml) doFormat() })
+
+const SAMPLE = `# Python 列表推导式完全指南
+
+列表推导式（List Comprehension）是 Python 语言中最具**标志性的语法特性**之一。它允许开发者用**一行表达式**完成原本需要多行循环才能实现的数据转换操作。
+
+## 基本语法
+
+列表推导式的核心思想是将循环逻辑压缩为表达式形式：
+
+\`\`\`python
+# 基本形式
+result = [表达式 for 变量 in 可迭代对象]
+
+# 带条件过滤
+result = [表达式 for 变量 in 可迭代对象 if 条件]
+
+# 带 if-else 三元运算
+result = [真值表达式 if 条件 else 假值表达式 for 变量 in 可迭代对象]
+\`\`\`
+
+> 理解列表推导式的关键在于，它本质上是将输入序列中的每个元素经过表达式变换后收集到新列表中。
+
+## 常见用法对比
+
+| 操作 | 传统写法 | 推导式写法 |
+|------|---------|-----------|
+| 生成平方数 | 4~6 行代码 | [i**2 for i in range(10)] |
+| 过滤偶数 | if + append | [x for x in nums if x % 2 == 0] |
+| 嵌套展开 | 双重 for | [(x,y) for x in xs for y in ys] |
+
+## 注意事项
+
+1. **控制复杂度** — 推导式适合简单的映射过滤逻辑，复杂逻辑应拆分为传统循环
+2. **嵌套深度** — 推导式嵌套不应超过两层
+3. **内存考量** — 海量数据处理时改用*生成器表达式*，方括号换圆括号即可实现惰性求值
+4. **避免副作用** — 推导式内部不应包含有副作用的函数调用
+
+## 总结
+
+掌握列表推导式是写出 Pythonic 代码的重要里程碑。它在简洁性和可读性之间取得了优雅的平衡。
+
+希望这对你有帮助！如还有其他问题，请随时告诉我。
+`
+</script>
+</body>
+</html>

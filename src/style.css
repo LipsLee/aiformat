@@ -1,0 +1,108 @@
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
+  background:#e9e7e3;color:#1a1a1a;
+  display:flex;flex-direction:column;height:100vh;overflow:hidden;
+}
+
+/* topbar */
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  height:44px;padding:0 16px;background:#fff;border-bottom:1px solid #e0ddd7;
+  flex-shrink:0;z-index:20;
+}
+.logo{font-size:16px;font-weight:700}
+.tb-right{display:flex;align-items:center;gap:12px}
+.tb-btn{
+  font-size:12px;padding:4px 12px;border:1px solid #ddd;border-radius:5px;
+  background:#fff;cursor:pointer;font-family:inherit;
+}
+.tb-btn:hover{background:#f5f4f1}
+.tgl{display:flex;align-items:center;gap:5px;font-size:12px;color:#666;cursor:pointer;user-select:none}
+.tgl input{accent-color:#2563eb}
+
+/* main */
+.main{display:flex;flex:1;overflow:hidden}
+.pane{display:flex;flex-direction:column;width:50%}
+
+/* left */
+.pane-left{background:#fafaf8;border-right:1px solid #e0ddd7}
+#inputArea{
+  flex:1;width:100%;padding:20px;border:none;resize:none;outline:none;
+  font-family:"SF Mono","Cascadia Code",Consolas,monospace;
+  font-size:14px;line-height:1.7;color:#222;background:none;
+}
+#inputArea::placeholder{color:#c5c1bb}
+
+/* right */
+.pane-right{background:#e8e6e1}
+.stylebar{
+  display:flex;align-items:center;gap:14px;padding:0 16px;
+  height:40px;background:#fff;border-bottom:1px solid #eee;flex-shrink:0;
+}
+.stylebar select{
+  font-size:12px;padding:4px 24px 4px 8px;border:1px solid #ddd;border-radius:5px;
+  background:#fafaf8;cursor:pointer;font-family:inherit;
+  appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg width='8' height='5' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23999'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 8px center;
+}
+.stylebar label{display:flex;align-items:center;gap:4px;font-size:11px;color:#888}
+.stylebar input[type=range]{width:56px;height:3px;accent-color:#1a1a1a;cursor:pointer}
+.stylebar span{font-size:11px;color:#555;min-width:14px}
+
+/* preview */
+.preview-stage{
+  flex:1;overflow:auto;padding:24px 28px 80px;
+  display:flex;justify-content:center;
+}
+.sheet{
+  width:100%;max-width:740px;background:#fff;
+  box-shadow:0 2px 8px rgba(0,0,0,.07);
+  padding:48px 56px;min-height:100%;
+  cursor:text;
+}
+.sheet .hint{color:#c5c1bb;display:block;text-align:center;padding:80px 0;cursor:default}
+
+/* floating bar */
+.floatbar{
+  position:fixed;bottom:16px;left:50%;transform:translateX(-50%);
+  display:flex;gap:0;padding:4px;
+  background:#1a1a1a;border-radius:10px;
+  box-shadow:0 4px 20px rgba(0,0,0,.25);
+  z-index:50;opacity:0;pointer-events:none;
+  transition:opacity .25s,transform .25s;
+  width:320px;
+}
+.floatbar.on{opacity:1;pointer-events:auto}
+.floatbar button{
+  flex:1;font-size:13px;font-weight:500;padding:8px 0;border-radius:7px;
+  cursor:pointer;font-family:inherit;white-space:nowrap;border:none;
+  text-align:center;
+}
+.fb-copy{background:#fff;color:#1a1a1a;margin:0 2px}
+.fb-copy:hover{background:#e8e8e8}
+.floatbar button:not(.fb-copy){
+  background:transparent;color:#aaa;margin:0 1px;
+}
+.floatbar button:not(.fb-copy):hover{color:#fff}
+
+/* toast */
+.toast{
+  position:fixed;bottom:72px;left:50%;transform:translateX(-50%);
+  padding:8px 18px;background:#1a1a1a;color:#fff;
+  border-radius:7px;font-size:13px;
+  opacity:0;pointer-events:none;transition:.2s;z-index:60;
+}
+.toast.on{opacity:1}
+
+/* ===== DOC STYLES — applied via style tag in preview ===== */
+/* These are NOT in the CSS file — they live in parser.ts makeStyles().
+   This file only has layout/app chrome styles. */
+
+@media(max-width:768px){
+  .main{flex-direction:column}
+  .pane{width:100%;height:50%}
+  .sheet{padding:32px 24px}
+}
