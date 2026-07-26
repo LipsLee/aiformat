@@ -13,8 +13,7 @@ export function copyRichText(html: string): void {
     el.contentEditable = 'true'
     el.innerHTML = `<style>${makeStyles(config)}</style>${clean}`
     el.style.position = 'fixed'; el.style.left = '-9999px'
-    document.body.appendChild(el)
-    el.focus()
+    document.body.appendChild(el); el.focus()
     const sel = window.getSelection()!, range = document.createRange()
     range.selectNodeContents(el); sel.removeAllRanges(); sel.addRange(range)
     document.execCommand('copy')
@@ -26,28 +25,23 @@ export function copyRichText(html: string): void {
     const div = document.createElement('div')
     div.innerHTML = clean
     const plain = (div.textContent || '').trim()
-    const item = new ClipboardItem({
+    navigator.clipboard.write([new ClipboardItem({
       'text/html': blob,
       'text/plain': new Blob([plain], { type: 'text/plain' }),
-    })
-    navigator.clipboard.write([item]).catch(fallback)
-  } catch {
-    fallback()
-  }
+    })]).catch(fallback)
+  } catch { fallback() }
 }
 
 export function copyPlainText(text: string): void {
   navigator.clipboard.writeText(text).catch(() => {
     const ta = document.createElement('textarea')
     ta.value = text; ta.style.position = 'fixed'; ta.style.left = '-9999px'
-    document.body.appendChild(ta); ta.select()
-    document.execCommand('copy')
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy')
     document.body.removeChild(ta)
   })
 }
 
-// ---- DOCX ----
-function text(el: Element): string { return el.textContent || '' }
+function txt(el: Element): string { return el.textContent || '' }
 
 function buildDocx(root: Element): (Paragraph | Table)[] {
   const out: (Paragraph | Table)[] = []
@@ -55,20 +49,36 @@ function buildDocx(root: Element): (Paragraph | Table)[] {
     const tag = el.tagName.toLowerCase()
     if (tag === 'style') continue
 
-    if (/^h[1-6]$/.test(tag)) {
-      const lv = parseInt(tag[1])
-      const sizes = [0,44,36,30,26,22,20]
-      const headMap = [HeadingLevel.HEADING_1,HeadingLevel.HEADING_1,HeadingLevel.HEADING_2,HeadingLevel.HEADING_3,HeadingLevel.HEADING_4,HeadingLevel.HEADING_5,HeadingLevel.HEADING_6]
+    if (tag === 'pre' && el.classList.contains('mermaid')) {
       out.push(new Paragraph({
-        children: [new TextRun({ text: text(el), bold: true, size: sizes[lv] })],
-        heading: headMap[lv],
+        children: [new TextRun({ text: '[流程图] ' + txt(el).slice(0, 120), italics: true, size: 20, color: '666666' })],
+        spacing: { after: 120 },
+        shading: { type: 'solid', color: 'fafbfc', fill: 'fafbfc' },
+      }))
+      continue
+    }
+
+    if (tag === 'div' && el.classList.contains('katex-display') || el.classList.contains('math-block')) {
+      out.push(new Paragraph({
+        children: [new TextRun({ text: txt(el).slice(0, 200), font: 'Courier New', size: 20 })],
+        spacing: { before: 120, after: 120 }, alignment: 'center',
+      }))
+      continue
+    }
+
+    if (/^h[1-6]$/.test(tag)) {
+      const lv = parseInt(tag[1]), sizes = [0,44,36,30,26,22,20]
+      const hMap = [HeadingLevel.HEADING_1,HeadingLevel.HEADING_1,HeadingLevel.HEADING_2,HeadingLevel.HEADING_3,HeadingLevel.HEADING_4,HeadingLevel.HEADING_5,HeadingLevel.HEADING_6]
+      out.push(new Paragraph({
+        children: [new TextRun({ text: txt(el), bold: true, size: sizes[lv] })],
+        heading: hMap[lv],
         spacing: { before: 400 - lv*50, after: 160 },
       }))
       continue
     }
     if (tag === 'p') {
       out.push(new Paragraph({
-        children: [new TextRun({ text: text(el), size: 22 })],
+        children: [new TextRun({ text: txt(el), size: 22 })],
         spacing: { after: 120 },
       }))
       continue
@@ -76,7 +86,7 @@ function buildDocx(root: Element): (Paragraph | Table)[] {
     if (tag === 'pre') {
       const code = el.querySelector('code')
       out.push(new Paragraph({
-        children: [new TextRun({ text: code ? text(code) : text(el), font: 'Courier New', size: 18 })],
+        children: [new TextRun({ text: code ? txt(code) : txt(el), font: 'Courier New', size: 18 })],
         spacing: { after: 120 },
         shading: { type: 'solid', color: '1e1e1e', fill: '1e1e1e' },
       }))
@@ -85,7 +95,7 @@ function buildDocx(root: Element): (Paragraph | Table)[] {
     if (tag === 'ul' || tag === 'ol') {
       el.querySelectorAll('li').forEach(li => {
         out.push(new Paragraph({
-          children: [new TextRun({ text: text(li), size: 22 })],
+          children: [new TextRun({ text: txt(li), size: 22 })],
           spacing: { after: 80 }, bullet: { level: 0 },
         }))
       })
@@ -93,7 +103,7 @@ function buildDocx(root: Element): (Paragraph | Table)[] {
     }
     if (tag === 'blockquote') {
       out.push(new Paragraph({
-        children: [new TextRun({ text: text(el), italics: true, size: 22 })],
+        children: [new TextRun({ text: txt(el), italics: true, size: 22 })],
         spacing: { after: 120 }, indent: { left: 480 },
         border: { left: { style: 'single', size: 10, color: '2563eb', space: 8 } },
       }))
@@ -107,7 +117,7 @@ function buildDocx(root: Element): (Paragraph | Table)[] {
       trs.forEach((tr, ri) => {
         const isHead = ri === 0 && !!tr.querySelector('th')
         const cells = Array.from(tr.querySelectorAll('th,td')).map(td => new TableCell({
-          children: [new Paragraph({ children: [new TextRun({ text: text(td), bold: isHead, size: 20 })] })],
+          children: [new Paragraph({ children: [new TextRun({ text: txt(td), bold: isHead, size: 20 })] })],
           width: { size: colWidth, type: WidthType.DXA },
           shading: isHead ? { type: 'solid', color: 'f5f4f0', fill: 'f5f4f0' } : undefined,
         }))

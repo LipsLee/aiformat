@@ -1,7 +1,7 @@
 import { Marked } from 'marked'
 import type { StyleConfig } from './style'
 
-const marked = new Marked({ gfm: true, breaks: true })
+const marked = new Marked({ gfm: true, breaks: false })
 
 export function parseMarkdown(text: string, c: StyleConfig): string {
   const body = marked.parse(text) as string
@@ -26,12 +26,15 @@ export function makeStyles(c: StyleConfig): string {
 .doc code{font-family:"SF Mono","Cascadia Code","JetBrains Mono",Consolas,monospace;font-size:.88em;background:#f2f1ef;padding:2px 6px;border-radius:3px;color:#c7254e;}
 .doc pre{margin:0.9em 0;padding:16px 20px;overflow-x:auto;background:#1e1e1e;border-radius:6px;}
 .doc pre code{font-size:.84em;line-height:1.55;color:#d4d4d4;background:none;padding:0;white-space:pre;}
+.doc pre.mermaid{background:#fafbfc;border:1px solid #e5e5e5;overflow-x:auto;text-align:center;color:#333;padding:12px 20px;}
+.doc .katex-display{margin:1em 0;overflow-x:auto;overflow-y:hidden;}
+.doc .katex{font-size:1.08em;}
 .doc table{width:100%;border-collapse:collapse;font-size:.92em;margin:0.9em 0;}
 .doc thead{border-bottom:2px solid #ddd;}
 .doc th{padding:9px 14px;text-align:left;font-weight:600;color:#555;font-size:.88em;letter-spacing:.3px;}
 .doc td{padding:9px 14px;border-bottom:1px solid #eee;}
 .doc tbody tr:hover td{background:#fafaf9;}
 .doc hr{border:none;border-top:1px solid #ddd;margin:2em 0;}
-.doc img{max-width:100%;height:auto;margin:.8em 0;}
+.doc img{max-width:100%;height:auto;margin:.8em 0;border-radius:4px;}
 `.trim()
 }

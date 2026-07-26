@@ -14,7 +14,6 @@
     "vite": "^8.1.1"
   },
   "dependencies": {
-    "@clerk/clerk-js": "^6.25.7",
     "docx": "^9.7.1",
     "file-saver": "^2.0.5",
     "marked": "^18.0.7"
