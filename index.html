@@ -4,7 +4,6 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>WriteX — AI回答一键格式化</title>
-<script async crossorigin src="https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.css" />
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16/dist/contrib/auto-render.min.js"></script>
@@ -96,32 +95,9 @@ body{
   opacity:0;pointer-events:none;transition:opacity .2s;z-index:60;
 }
 #toast.on{opacity:1}
-#auth-overlay{
-  position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:90;
-  display:flex;align-items:center;justify-content:center;
-  opacity:0;pointer-events:none;transition:opacity .2s;
-}
-#auth-overlay.on{opacity:1;pointer-events:auto}
-#auth-box{
-  background:#fff;border-radius:12px;padding:32px;width:380px;max-width:90vw;
-  text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.2);position:relative;
-}
-#auth-box h2{font-size:18px;margin-bottom:8px}
-#auth-box p{font-size:13px;color:#888;margin-bottom:24px;line-height:1.6}
-#auth-box .btn-auth{
-  font-size:13px;font-weight:500;padding:10px 28px;border-radius:7px;
-  cursor:pointer;font-family:inherit;border:none;
-  background:#1a1a1a;color:#fff;margin:4px;
-}
-#auth-box .btn-auth:hover{background:#333}
-#auth-box .close{
-  position:absolute;top:8px;right:12px;
-  font-size:18px;cursor:pointer;color:#999;background:none;border:none;
-}
-#auth-box .close:hover{color:#333}
 @media print{
   html,body{overflow:visible!important;height:auto!important;background:#fff!important}
-  #topbar,#left,#stylebar,#floatbar,#toast,#auth-overlay{display:none!important}
+  #topbar,#left,#stylebar,#floatbar,#toast{display:none!important}
   #main{display:block!important;overflow:visible!important}
   #right{width:100%!important;background:#fff!important;overflow:visible!important}
   #stage{overflow:visible!important;padding:0!important;display:block!important}
@@ -180,60 +156,81 @@ body{
 
 <div id="toast"></div>
 
-<div id="auth-overlay">
-  <div id="auth-box">
-    <button class="close" id="authClose">&times;</button>
-    <h2>登录 WriteX</h2>
-    <p>登录后可解锁 Pro 功能</p>
-    <button class="btn-auth" id="authGoogle"><span style="font-size:16px">G</span>&nbsp; Google 登录</button>
-    <button class="btn-auth" id="authGitHub"><span style="font-size:16px">&#9906;</span>&nbsp; GitHub 登录</button>
-  </div>
-</div>
-
 <script type="module">
 import { parseMarkdown } from './src/parser.ts'
 import { cleanAIPhrases } from './src/cleaner.ts'
 import { getStyleConfig } from './src/style.ts'
 import { copyRichText, copyPlainText, downloadDocx } from './src/export.ts'
+import { AuthenticationClient } from 'authing-js-sdk'
 
 var $=id=>document.getElementById(id)
 var inputArea=$('inputArea'),previewArea=$('preview'),floatBar=$('floatbar')
 var chkClean=$('chkClean'),toastEl=$('toast'),currentHtml=''
 
-// ==== CLERK ====
-var CK='pk_test_Zml0dGluZy1yb2RlbnQtMjkuY2xlcmsuYWNjb3VudHMuZGV2JA'
-var btnLogin=$('btnLogin'),authOverlay=$('auth-overlay'),clerk=null,cr=0
-function initClerk() {
-  if (window.Clerk) {
-    clerk=new window.Clerk(CK)
-    clerk.load().then(function(){
-      if (clerk.user) showIn(clerk.user); else showOut()
-      clerk.addListener(function(e){ if(e.user) showIn(e.user); else showOut() })
-    }).catch(function(){ btnLogin.style.display='none' })
-  } else if (cr<80) { cr++; setTimeout(initClerk,250) }
-}
-initClerk()
-function showIn(u){
-  btnLogin.textContent=u.fullName||u.primaryEmailAddress||'OK'
-  btnLogin.style.background='#fff';btnLogin.style.color='#1a1a1a';btnLogin.style.borderColor='#ddd'
-  btnLogin.onclick=function(){ clerk&&clerk.openUserProfile() }
-  authOverlay.classList.remove('on')
-}
-function showOut(){
-  btnLogin.textContent='登录'
-  btnLogin.style.background='#1a1a1a';btnLogin.style.color='#fff';btnLogin.style.borderColor='#1a1a1a'
-  btnLogin.onclick=function(){ authOverlay.classList.add('on') }
-}
-$('authClose').addEventListener('click',function(){ authOverlay.classList.remove('on') })
-authOverlay.addEventListener('click',function(e){ if(e.target===authOverlay) authOverlay.classList.remove('on') })
-$('authGoogle').addEventListener('click',function(){ if(clerk) clerk.authenticate({strategy:'oauth_google',redirectUrl:window.location.href}) })
-$('authGitHub').addEventListener('click',function(){ if(clerk) clerk.authenticate({strategy:'oauth_github',redirectUrl:window.location.href}) })
+// ===== AUTHING =====
+// ⚠️ 替换为你的 Authing 应用配置（在 console.authing.cn 创建应用后获取）
+var AUTHING_APP_ID  = 'YOUR_APP_ID'
+var AUTHING_APP_HOST = 'https://YOUR_APP.authing.cn'
+var AUTHING_REDIRECT = window.location.origin + window.location.pathname
 
-// ==== APP ====
+var authing = new AuthenticationClient({
+  appId: AUTHING_APP_ID,
+  appHost: AUTHING_APP_HOST,
+  redirectUri: AUTHING_REDIRECT,
+})
+
+var btnLogin=$('btnLogin')
+
+// Handle callback: check if we just came back from Authing login
+var params = new URLSearchParams(window.location.search)
+var code = params.get('code')
+if (code) {
+  // Clean URL
+  window.history.replaceState({}, document.title, window.location.pathname)
+
+  authing.getAccessTokenByCode(code).then(function() {
+    return authing.getCurrentUser()
+  }).then(function(user) {
+    showUser(user)
+    var loginEvent = new CustomEvent('writex-login', { detail: user })
+    window.dispatchEvent(loginEvent)
+  }).catch(function(e) {
+    console.error('Authing login failed:', e)
+  })
+}
+
+function showUser(user) {
+  var name = user.username || user.name || user.phone || user.email || 'OK'
+  btnLogin.textContent = name
+  btnLogin.style.background = '#fff'
+  btnLogin.style.color = '#1a1a1a'
+  btnLogin.style.borderColor = '#ddd'
+  btnLogin.onclick = function() {
+    if (confirm('要退出登录吗？')) {
+      authing.logout()
+      window.location.reload()
+    }
+  }
+}
+
+// Check if already logged in (from previous session)
+authing.getCurrentUser().then(function(user) {
+  if (user) showUser(user)
+}).catch(function() {})
+
+btnLogin.onclick = function() {
+  // Build Authing hosted login URL and redirect
+  var loginUrl = authing.buildAuthorizeUrl({
+    scope: 'openid profile phone email',
+    protocol: 'oidc',
+  })
+  window.location.href = loginUrl
+}
+
+// ===== APP =====
 function toast(m){ toastEl.textContent=m;toastEl.classList.add('on');setTimeout(function(){ toastEl.classList.remove('on') },1800) }
 
 function renderMathAndDiagrams(){
-  // KaTeX auto-render
   if (window.renderMathInElement) {
     try {
       window.renderMathInElement(previewArea, {
@@ -245,7 +242,6 @@ function renderMathAndDiagrams(){
       })
     } catch(e) {}
   }
-  // Mermaid
   if (window.mermaid) {
     try {
       window.mermaid.run({ querySelector: '.doc .mermaid' }).catch(function(){})
@@ -273,7 +269,6 @@ $('btnClear').addEventListener('click',function(){
   inputArea.value=''
   previewArea.innerHTML='<span class="hint">在左侧粘贴 AI 回答<br/>点击「执行」开始格式化</span>'
   currentHtml='';floatBar.classList.remove('on')
-  if (window.mermaid) { try { window.mermaid.run({ querySelector: '.doc .mermaid' }).catch(function(){}) } catch(e) {} }
 })
 chkClean.addEventListener('change',function(){ if(currentHtml) doFormat() })
 
@@ -371,8 +366,7 @@ var SAMPLE = [
   '',
   '## 总结',
   '',
-  'WriteX 兼容所有主流 AI 平台的 Markdown 输出，完美保留**数学公式**、**物理公式**、**化学方程式**、**Mermaid 流程图**和**代码块**的格式。',
-  '一键导出 Word / PDF 文档，复制到飞书、微信也能保持格式。',
+  'WriteX 兼容所有主流 AI 平台的 Markdown 输出。完美保留**数学公式**、**物理公式**、**化学方程式**、**Mermaid 流程图**和**代码块**的格式，一键导出 Word / PDF 文档。',
   '',
   '希望这对你有帮助！如还有其他问题，请随时告诉我。'
 ].join('\n')
