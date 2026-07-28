@@ -118,7 +118,6 @@ body{
     <label class="tgl"><input type="checkbox" id="chkClean" />清除AI用语</label>
     <button id="btnSample">示例</button>
     <button id="btnClear">清空</button>
-    <button id="btnLogin" style="background:#1a1a1a;color:#fff;border-color:#1a1a1a;">登录</button>
   </div>
 </div>
 
@@ -161,71 +160,10 @@ import { parseMarkdown } from './src/parser.ts'
 import { cleanAIPhrases } from './src/cleaner.ts'
 import { getStyleConfig } from './src/style.ts'
 import { copyRichText, copyPlainText, downloadDocx } from './src/export.ts'
-import { AuthenticationClient } from 'authing-js-sdk'
 
 var $=id=>document.getElementById(id)
 var inputArea=$('inputArea'),previewArea=$('preview'),floatBar=$('floatbar')
 var chkClean=$('chkClean'),toastEl=$('toast'),currentHtml=''
-
-// ===== AUTHING =====
-// ⚠️ 替换为你的 Authing 应用配置（在 console.authing.cn 创建应用后获取）
-var AUTHING_APP_ID  = 'YOUR_APP_ID'
-var AUTHING_APP_HOST = 'https://YOUR_APP.authing.cn'
-var AUTHING_REDIRECT = window.location.origin + window.location.pathname
-
-var authing = new AuthenticationClient({
-  appId: AUTHING_APP_ID,
-  appHost: AUTHING_APP_HOST,
-  redirectUri: AUTHING_REDIRECT,
-})
-
-var btnLogin=$('btnLogin')
-
-// Handle callback: check if we just came back from Authing login
-var params = new URLSearchParams(window.location.search)
-var code = params.get('code')
-if (code) {
-  // Clean URL
-  window.history.replaceState({}, document.title, window.location.pathname)
-
-  authing.getAccessTokenByCode(code).then(function() {
-    return authing.getCurrentUser()
-  }).then(function(user) {
-    showUser(user)
-    var loginEvent = new CustomEvent('writex-login', { detail: user })
-    window.dispatchEvent(loginEvent)
-  }).catch(function(e) {
-    console.error('Authing login failed:', e)
-  })
-}
-
-function showUser(user) {
-  var name = user.username || user.name || user.phone || user.email || 'OK'
-  btnLogin.textContent = name
-  btnLogin.style.background = '#fff'
-  btnLogin.style.color = '#1a1a1a'
-  btnLogin.style.borderColor = '#ddd'
-  btnLogin.onclick = function() {
-    if (confirm('要退出登录吗？')) {
-      authing.logout()
-      window.location.reload()
-    }
-  }
-}
-
-// Check if already logged in (from previous session)
-authing.getCurrentUser().then(function(user) {
-  if (user) showUser(user)
-}).catch(function() {})
-
-btnLogin.onclick = function() {
-  // Build Authing hosted login URL and redirect
-  var loginUrl = authing.buildAuthorizeUrl({
-    scope: 'openid profile phone email',
-    protocol: 'oidc',
-  })
-  window.location.href = loginUrl
-}
 
 // ===== APP =====
 function toast(m){ toastEl.textContent=m;toastEl.classList.add('on');setTimeout(function(){ toastEl.classList.remove('on') },1800) }
@@ -283,7 +221,7 @@ $('btnCopyPlain').addEventListener('click',function(){
 })
 $('btnDocx').addEventListener('click',function(){
   if(!currentHtml) return toast('请先粘贴内容并点执行')
-  downloadDocx(currentHtml,'WriteX-输出.docx');toast('DOCX 下载中...')
+  downloadDocx(currentHtml,'贴正Pastify-输出.docx');toast('DOCX 下载中...')
 })
 $('btnPdf').addEventListener('click',function(){
   if(!currentHtml) return toast('请先粘贴内容并点执行')
@@ -362,11 +300,11 @@ var SAMPLE = [
   '| 归并 | $O(n\\log n)$ | $O(n\\log n)$ | $O(n\\log n)$ | $O(n)$ |',
   '| 堆排 | $O(n\\log n)$ | $O(n\\log n)$ | $O(n\\log n)$ | $O(1)$ |',
   '',
-  '> 上表展示了 WriteX 对表格内嵌 LaTeX 公式的渲染能力。',
+  '> 上表展示了贴正 Pastify 对表格内嵌 LaTeX 公式的渲染能力。',
   '',
   '## 总结',
   '',
-  'WriteX 兼容所有主流 AI 平台的 Markdown 输出。完美保留**数学公式**、**物理公式**、**化学方程式**、**Mermaid 流程图**和**代码块**的格式，一键导出 Word / PDF 文档。',
+  '贴正 Pastify 兼容所有主流 AI 平台的 Markdown 输出。完美保留**数学公式**、**物理公式**、**化学方程式**、**Mermaid 流程图**和**代码块**的格式，一键导出 Word / PDF 文档。',
   '',
   '希望这对你有帮助！如还有其他问题，请随时告诉我。'
 ].join('\n')
