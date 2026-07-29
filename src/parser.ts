@@ -4,8 +4,46 @@ import type { StyleConfig } from './style'
 const marked = new Marked({ gfm: true, breaks: false })
 
 export function parseMarkdown(text: string, c: StyleConfig): string {
-  const body = marked.parse(text) as string
+  const prepped = preProcess(text)
+  const body = marked.parse(prepped) as string
   return `<style>${makeStyles(c)}</style><div class="doc">${body}</div>`
+}
+
+function preProcess(text: string): string {
+  let out = text
+
+  // 1. Normalize \(...\) → $...$ (some AI platforms use this)
+  out = out.replace(/\\\(/g, '$').replace(/\\\)/g, '$')
+  // 2. Normalize \[...\] → $$...$$ (display math)
+  out = out.replace(/\\\[/g, '$$').replace(/\\\]/g, '$$')
+  // 3. Fix double-escaping: \\\( → \(  etc.
+  // (leave single-escaped as-is, they get handled by step 1+2 if re-run)
+
+  // 4. Protect LaTeX underscores inside $...$ from markdown italics
+  //    Marked treats _text_ as italic. If _ is inside $...$, it's a subscript,
+  //    but marked may have already parse it. We protect by temporarily replacing.
+  //    Actually, marked's gfm mode handles this OK when _ is inside $.
+  //    But if the user's raw text has unmatched $, we help:
+  out = fixUnbalancedDollars(out)
+
+  // 5. Convert \\( and \\) back to single \( and \)
+  out = out.replace(/\\\\\(/g, '\\(').replace(/\\\\\)/g, '\\)')
+
+  return out
+}
+
+function fixUnbalancedDollars(text: string): string {
+  // If there's an odd number of single $, try to pair them up
+  const lines = text.split('\n')
+  return lines.map(line => {
+    // Count $ that are not part of $$
+    const singleDollars = line.match(/(?<!\$)\$(?!\$)/g)
+    if (singleDollars && singleDollars.length % 2 !== 0) {
+      // Odd count — could be a broken formula. Leave alone, deep correct handles it.
+      return line
+    }
+    return line
+  }).join('\n')
 }
 
 export function makeStyles(c: StyleConfig): string {

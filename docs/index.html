@@ -47,6 +47,9 @@ body{
 }
 #btnExec{font-size:13px;font-weight:600;padding:7px 24px;border:none;border-radius:6px;cursor:pointer;font-family:inherit;background:#1a1a1a;color:#fff}
 #btnExec:hover{background:#333}
+.deep-btn{font-size:13px;font-weight:600;padding:7px 16px;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-family:inherit;background:#fff;color:#555}
+.deep-btn:hover{background:#f5f4f1;border-color:#bbb}
+.deep-btn.loading{color:#999;pointer-events:none}
 .exe-bar .kb{font-size:10px;color:#aaa;margin-left:4px}
 #right{width:50%;display:flex;flex-direction:column;background:#ddd8d1;overflow:hidden}
 #stylebar{
@@ -109,7 +112,7 @@ body{
   #preview{padding:32px 24px}
 }
 </style>
-  <script type="module" crossorigin src="/pastify/assets/index-Dp4YSYwm.js"></script>
+  <script type="module" crossorigin src="/pastify/assets/index-CsUFAz32.js"></script>
 </head>
 <body>
 
@@ -127,6 +130,7 @@ body{
     <textarea id="inputArea" placeholder="粘贴 AI 回答到这里..."></textarea>
     <div class="exe-bar">
       <button id="btnExec">执行</button>
+      <button id="btnDeep" class="deep-btn">深度更正</button>
       <span class="kb">Ctrl+Enter</span>
     </div>
   </div>
