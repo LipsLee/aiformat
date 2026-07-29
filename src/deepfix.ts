@@ -1,4 +1,7 @@
-// Deep correction — walk DOM text nodes, find mangled or unrendered LaTeX, re-render
+// Deep correction — walk DOM text nodes, find mangled or unrendered LaTeX AND markdown, re-render
+import { Marked } from 'marked'
+
+const md = new Marked({ gfm: true, breaks: false })
 
 interface TextPatch {
   node: Text
@@ -49,8 +52,8 @@ function collectPatches(root: Element): TextPatch[] {
 function walk(node: Node, patches: TextPatch[]) {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent || ''
-    if (hasLatex(text)) {
-      const parts = parseMixedContent(text)
+    if (hasIssues(text)) {
+      const parts = processText(text)
       if (parts && parts.some(p => typeof p !== 'string')) {
         patches.push({ node: node as Text, parts })
       }
@@ -63,7 +66,6 @@ function walk(node: Node, patches: TextPatch[]) {
   const tag = el.tagName.toLowerCase()
   if (
     tag === 'script' || tag === 'style' ||
-    el.classList.contains('katex') || el.classList.contains('katex-display') ||
     el.closest('.katex') || el.closest('pre') || el.closest('code') ||
     el.closest('.mermaid') || el.closest('[data-deep-fixed]')
   ) return
@@ -73,80 +75,88 @@ function walk(node: Node, patches: TextPatch[]) {
   }
 }
 
+// ========== DETECTION ==========
+
 const LATEX_SIGNAL = /\\frac|\\sum|\\int|\\prod|\\sqrt|\\alpha|\\beta|\\gamma|\\delta|\\epsilon|\\theta|\\lambda|\\mu|\\pi|\\sigma|\\omega|\\infty|\\partial|\\nabla|\\times|\\div|\\pm|\\cdot|\\leq|\\geq|\\neq|\\approx|\\equiv|\\rightarrow|\\Rightarrow|\\leftarrow|\\Leftarrow|\\subset|\\supset|\\in|\\notin|\\forall|\\exists|\\mathbb|\\mathbf|\\mathcal|\\text|\\begin|\\end|\\lim|\\log|\\ln|\\sin|\\cos|\\tan|\\det|\\max|\\min|\\bigg|\\Bigg|\\big|\\Big|\\hbar|\\hat|\\dot|\\ddot|\\widehat|\\overrightarrow|\\overleftarrow|\\mapsto|\\longrightarrow|\\longleftarrow|\\left|\\right|\\middle|\\langle|\\rangle|\\lVert|\\rVert|\\binom/
+
+const MD_SIGNAL = /\*\*[^*]+\*\*|\*[^*]+\*|~~[^~]+~~|`{1,2}[^`]+`{1,2}|\[[^\]]+\]\([^)]+\)|^#{1,6}\s+|^\s*[-*+]\s+|^\s*\d+\.\s+|^>\s+|^\|.+\|$/m
+
+function hasIssues(text: string): boolean {
+  return hasLatex(text) || hasMarkdown(text)
+}
 
 function hasLatex(text: string): boolean {
   return LATEX_SIGNAL.test(text) || /\$[^$]+\$/.test(text) || /\$\$[\s\S]*?\$\$/.test(text) || /\\\(/.test(text) || /\\\[/.test(text)
 }
 
-function parseMixedContent(text: string): (string | Element)[] {
-  const parts: (string | Element)[] = []
+function hasMarkdown(text: string): boolean {
+  return MD_SIGNAL.test(text)
+}
 
-  // Regex captures:
-  // $$...$$ | $...$ | \(...\) | \[...\] | raw LaTeX fractions
-  const pattern = /(\$\$[\s\S]+?\$\$)|(\$[^$]+\$)|(\\\(.+?\\\))|(\\\[[\s\S]+?\\\])/g
+// ========== PROCESSING ==========
 
-  let lastIndex = 0
-  let match: RegExpExecArray | null
+function processText(text: string): (string | Element)[] {
+  // Step 1: extract and protect LaTeX blocks
+  const latexBlocks: string[] = []
+  let processed = text
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, m) => { latexBlocks.push('$$' + m.trim() + '$$'); return `␟L${latexBlocks.length - 1}␟` })
+    .replace(/\\\((.+?)\\\)/g,  (_, m) => { latexBlocks.push('$' + m.trim() + '$');    return `␟L${latexBlocks.length - 1}␟` })
+    .replace(/\$\$([\s\S]+?)\$\$/g,  (_, m) => { latexBlocks.push('$$' + m.trim() + '$$'); return `␟L${latexBlocks.length - 1}␟` })
+    .replace(/\$([^$]+?)\$/g,       (_, m) => { latexBlocks.push('$' + m.trim() + '$');    return `␟L${latexBlocks.length - 1}␟` })
 
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index))
-    }
+  // Step 2: parse remaining text with marked to convert markdown → HTML
+  let html = md.parse(processed) as string
 
-    const raw = match[0]
-    try {
-      let latex: string
-      let displayMode: boolean
-
-      if (raw.startsWith('$$')) {
-        latex = raw.slice(2, -2).trim()
-        displayMode = true
-      } else if (raw.startsWith('\\[')) {
-        latex = raw.slice(2, -2).trim()
-        displayMode = true
-      } else if (raw.startsWith('\\(')) {
-        latex = raw.slice(2, -2).trim()
-        displayMode = false
-      } else if (raw.startsWith('$')) {
-        latex = raw.slice(1, -1).trim()
-        displayMode = false
-      } else {
-        parts.push(raw)
-        lastIndex = pattern.lastIndex
-        continue
-      }
-
-      const katex = (window as any).katex
-      if (katex && latex) {
-        const span = document.createElement('span')
-        span.setAttribute('data-deep-fixed', '1')
-        span.innerHTML = katex.renderToString(latex, {
-          displayMode,
-          throwOnError: false,
-          strict: false,
-        })
-        if (displayMode) {
-          span.classList.add('math-block')
-          span.style.cssText = 'display:block;overflow-x:auto;padding:12px 0;text-align:center;'
-        } else {
-          span.classList.add('math-inline')
-          span.style.display = 'inline'
-        }
-        parts.push(span)
-      } else {
-        parts.push(raw)
-      }
-    } catch {
-      parts.push(raw)
-    }
-
-    lastIndex = pattern.lastIndex
+  // Step 3: restore latex blocks
+  for (let i = 0; i < latexBlocks.length; i++) {
+    html = html.replace(`␟L${i}␟`, latexBlocks[i])
   }
 
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex))
+  // Step 4: strip <p> wrapper if text is a single paragraph with only inline content
+  html = html.replace(/^<p>(.+?)<\/p>\n*$/s, '$1')
+
+  // Step 5: build elements from HTML
+  const div = document.createElement('div')
+  div.setAttribute('data-deep-fixed', '1')
+  div.innerHTML = html
+
+  const parts: (string | Element)[] = []
+  while (div.firstChild) {
+    parts.push(div.firstChild as Element)
+  }
+
+  // Step 6: render any remaining LaTeX in the new elements
+  const katex = (window as any).katex
+  if (katex) {
+    renderLatexInParts(parts, katex)
   }
 
   return parts.length > 0 ? parts : [text]
+}
+
+function renderLatexInParts(parts: (string | Element)[], katex: any) {
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]
+    if (part instanceof Text || typeof part === 'string') continue
+
+    // Walk element to find text nodes with LaTeX
+    const walkEl = (el: Element) => {
+      for (const child of Array.from(el.childNodes)) {
+        if (child.nodeType === Node.TEXT_NODE) {
+          const txt = child.textContent || ''
+          if (hasLatex(txt)) {
+            const span = document.createElement('span')
+            try {
+              span.innerHTML = txt.replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => katex.renderToString(m.trim(), { displayMode: true, throwOnError: false, strict: false }))
+                .replace(/\$([^$]+?)\$/g, (_, m) => katex.renderToString(m.trim(), { displayMode: false, throwOnError: false, strict: false }))
+              child.parentNode?.replaceChild(span, child)
+            } catch { /* keep original */ }
+          }
+        } else if (child.nodeType === Node.ELEMENT_NODE) {
+          walkEl(child as Element)
+        }
+      }
+    }
+    walkEl(part)
+  }
 }
