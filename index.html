@@ -30,6 +30,7 @@ body{
 #topbar button:hover{background:#f4f3f0}
 #topbar .tgl{display:flex;align-items:center;gap:4px;font-size:12px;color:#777;cursor:pointer;user-select:none}
 #topbar .tgl input{accent-color:#2563eb;margin:0}
+
 #main{display:flex;flex:1;min-height:0}
 #left{
   width:50%;display:flex;flex-direction:column;
@@ -51,6 +52,7 @@ body{
 .deep-btn:hover{background:#f5f4f1;border-color:#bbb}
 .deep-btn.loading{color:#999;pointer-events:none}
 .exe-bar .kb{font-size:10px;color:#aaa;margin-left:4px}
+
 #right{width:50%;display:flex;flex-direction:column;background:#ddd8d1;overflow:hidden}
 #stylebar{
   display:flex;align-items:center;gap:12px;
@@ -67,6 +69,7 @@ body{
 #stylebar .grp{display:flex;align-items:center;gap:4px;font-size:11px;color:#999}
 #stylebar .grp input[type=range]{width:52px;height:3px;accent-color:#1a1a1a;cursor:pointer}
 #stylebar .grp .v{font-size:11px;color:#555;min-width:14px}
+
 #stage{flex:1;overflow:auto;padding:32px;display:flex;justify-content:center}
 #preview{
   width:100%;max-width:760px;background:#fff;
@@ -74,23 +77,25 @@ body{
   padding:48px 56px;align-self:flex-start;
 }
 #preview .hint{color:#c5bfb8;text-align:center;padding:100px 0;line-height:1.8}
+
+/* float bar — 3 buttons */
 #floatbar{
   position:fixed;bottom:16px;left:50%;transform:translateX(-50%);
-  display:flex;gap:0;padding:4px;width:320px;
+  display:flex;gap:6px;padding:5px 8px;
   background:#1a1a1a;border-radius:10px;
   box-shadow:0 4px 20px rgba(0,0,0,.25);
   z-index:50;opacity:0;pointer-events:none;transition:opacity .2s;
 }
 #floatbar.on{opacity:1;pointer-events:auto}
 #floatbar button{
-  flex:1;font-size:13px;font-weight:500;padding:8px 0;
-  border-radius:7px;cursor:pointer;font-family:inherit;border:none;
-  text-align:center;margin:0 1px;
+  font-size:13px;font-weight:500;padding:8px 18px;border-radius:7px;
+  cursor:pointer;font-family:inherit;border:none;white-space:nowrap;
 }
 #floatbar .pri{background:#fff;color:#1a1a1a}
 #floatbar .pri:hover{background:#e8e8e8}
 #floatbar button:not(.pri){background:transparent;color:#aaa}
 #floatbar button:not(.pri):hover{color:#fff}
+
 #toast{
   position:fixed;bottom:72px;left:50%;transform:translateX(-50%);
   padding:8px 18px;background:#1a1a1a;color:#fff;
@@ -98,6 +103,7 @@ body{
   opacity:0;pointer-events:none;transition:opacity .2s;z-index:60;
 }
 #toast.on{opacity:1}
+
 @media print{
   html,body{overflow:visible!important;height:auto!important;background:#fff!important}
   #topbar,#left,#stylebar,#floatbar,#toast{display:none!important}
@@ -151,8 +157,7 @@ body{
 </div>
 
 <div id="floatbar">
-  <button id="btnCopy" class="pri">复制格式</button>
-  <button id="btnCopyPlain">纯文本</button>
+  <button id="btnCopy" class="pri">复制</button>
   <button id="btnDocx">docx</button>
   <button id="btnPdf">PDF</button>
 </div>
@@ -163,7 +168,7 @@ body{
 import { parseMarkdown } from './src/parser.ts'
 import { cleanAIPhrases } from './src/cleaner.ts'
 import { getStyleConfig } from './src/style.ts'
-import { copyRichText, copyPlainText, downloadDocx } from './src/export.ts'
+import { copyRichText, downloadDocx } from './src/export.ts'
 import { deepCorrect } from './src/deepfix.ts'
 
 var $=id=>document.getElementById(id)
@@ -171,11 +176,9 @@ var inputArea=$('inputArea'),previewArea=$('preview'),floatBar=$('floatbar')
 var chkClean=$('chkClean'),toastEl=$('toast')
 var currentStyle='', hasContent=false
 
-// ===== APP =====
 function toast(m){ toastEl.textContent=m;toastEl.classList.add('on');setTimeout(function(){ toastEl.classList.remove('on') },1800) }
 
 function renderMathAndDiagrams(){
-  // KaTeX
   if (window.renderMathInElement) {
     try {
       window.renderMathInElement(previewArea, {
@@ -189,14 +192,16 @@ function renderMathAndDiagrams(){
       })
     } catch(e) {}
   }
-  // Mermaid
   if (window.mermaid) {
-    try {
-      window.mermaid.run({ querySelector: '.doc pre.mermaid' }).catch(function(){})
-    } catch(e) {
-      setTimeout(function() {
-        try { window.mermaid.run({ querySelector: '.doc pre.mermaid' }).catch(function(){}) } catch(e2) {}
-      }, 500)
+    var mermaids = previewArea.querySelectorAll('.doc pre.mermaid')
+    if (mermaids.length) {
+      try {
+        window.mermaid.run({ nodes: mermaids }).catch(function(){})
+      } catch(e) {
+        setTimeout(function() {
+          try { window.mermaid.run({ nodes: previewArea.querySelectorAll('.doc pre.mermaid') }).catch(function(){}) } catch(e2) {}
+        }, 800)
+      }
     }
   }
 }
@@ -210,7 +215,7 @@ async function doFormat(){
   var src=chkClean.checked ? cleanAIPhrases(raw) : raw
   var r=parseMarkdown(src,getStyleConfig())
   currentStyle=r.style
-  previewArea.innerHTML='<style id="docstyle">'+r.style+'</style><div class="doc">'+r.html+'</div>'
+  previewArea.innerHTML='<style>'+r.style+'</style><div class="doc">'+r.html+'</div>'
   renderMathAndDiagrams()
   hasContent=true;floatBar.classList.add('on')
 }
@@ -226,14 +231,9 @@ async function doDeepFix(){
   if(!docEl) { btn.textContent='深度更正'; btn.classList.remove('loading'); return }
 
   var count = await deepCorrect(docEl)
-
-  if(count>0){
-    btn.textContent='深度更正';btn.classList.remove('loading')
-    toast('已修正 '+count+' 处未渲染的公式')
-  } else {
-    btn.textContent='深度更正';btn.classList.remove('loading')
-    toast('未发现需要修正的内容')
-  }
+  btn.textContent='深度更正';btn.classList.remove('loading')
+  if(count>0) toast('已修正 '+count+' 处未渲染的内容')
+  else toast('未发现需要修正的内容')
 }
 
 $('btnExec').addEventListener('click',doFormat)
@@ -247,36 +247,30 @@ $('btnClear').addEventListener('click',function(){
 })
 chkClean.addEventListener('change',function(){ if(hasContent) doFormat() })
 
-function getRenderedHtml(){
-  var docEl=previewArea.querySelector('.doc')
-  if(!docEl) return ''
-  return '<style>'+currentStyle+'</style><div class="doc">'+docEl.innerHTML+'</div>'
-}
-
-function getRenderedText(){
-  var docEl=previewArea.querySelector('.doc')
-  return docEl ? docEl.textContent||'' : ''
-}
+// ==== Export: all read from the real rendered DOM ====
 
 $('btnCopy').addEventListener('click',function(){
   if(!hasContent) return toast('请先粘贴内容并点执行')
-  copyRichText(getRenderedHtml(),currentStyle);toast('已复制，可粘贴到 Word / 飞书 / 微信')
+  var docEl=previewArea.querySelector('.doc')
+  if(!docEl) return toast('找不到内容')
+  // Build self-contained HTML from the live rendered DOM (with Katex SVGs, Mermaid SVGs etc)
+  var fullHtml='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'+currentStyle+'</style></head><body><div class="doc">'+docEl.innerHTML+'</div></body></html>'
+  copyRichText(fullHtml,currentStyle)
+  toast('已复制 — 可粘贴到 Word / 飞书 / 微信')
 })
-$('btnCopyPlain').addEventListener('click',function(){
-  var t=getRenderedText().trim()
-  if(!t) return toast('请先粘贴内容并点执行')
-  copyPlainText(t);toast('已复制纯文本')
-})
+
 $('btnDocx').addEventListener('click',async function(){
   if(!hasContent) return toast('请先粘贴内容并点执行')
   try {
     var docEl=previewArea.querySelector('.doc')
+    if(!docEl) return toast('找不到内容')
     await downloadDocx(docEl,currentStyle,'贴正Pastify-输出.docx')
-    toast('DOCX 下载中...')
+    toast('DOCX 下载完成')
   } catch(e) {
     toast('导出失败，请重试')
   }
 })
+
 $('btnPdf').addEventListener('click',function(){
   if(!hasContent) return toast('请先粘贴内容并点执行')
   window.print()
@@ -295,23 +289,11 @@ var SAMPLE = [
   '',
   '支持 **ChatGPT / Claude / DeepSeek / 豆包 / Gemini** 等所有主流AI平台。',
   '',
-  '## 多平台公式测试',
-  '',
-  '标准LaTeX（ChatGPT/Claude）：行内 $E=mc^2$，块级 $$\\sum_{n=1}^{\\infty} \\frac{1}{n^2} = \\frac{\\pi^2}{6}$$',
-  '',
-  '圆括号LaTeX（部分AI平台）：行内 \\(\\alpha + \\beta = \\gamma\\)，块级 \\[\\oint_C \\mathbf{F} \\cdot d\\mathbf{r}\\]',
-  '',
   '## 微积分',
   '',
   '定积分分部积分公式：',
   '',
   '$$\\int_{a}^{b} u(x)v\'(x)dx = u(x)v(x)\\bigg|_{a}^{b} - \\int_{a}^{b} v(x)u\'(x)dx$$',
-  '',
-  '## 数学公式',
-  '',
-  '欧拉恒等式：$e^{i\\pi} + 1 = 0$',
-  '贝叶斯公式：$P(A|B) = \\frac{P(B|A)P(A)}{P(B)}$',
-  '高斯积分：$$\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}$$',
   '',
   '## 物理公式',
   '',
@@ -323,7 +305,6 @@ var SAMPLE = [
   '',
   '电离平衡：$$K_w = [\\text{H}^+][\\text{OH}^-] = 1.0 \\times 10^{-14}$$',
   '理想气体：$$PV = nRT$$',
-  '能斯特方程：$$E = E^0 - \\frac{RT}{nF}\\ln Q$$',
   '',
   '## Mermaid 流程图',
   '',
@@ -356,9 +337,9 @@ var SAMPLE = [
   '| 归并 | $O(n\\log n)$ | $O(n)$ |',
   '| Dijkstra | $O((V+E)\\log V)$ | $O(V)$ |',
   '',
-  '> 贴正 Pastify 兼容所有 AI 平台的 Markdown 输出。执行后如仍有公式未渲染，点击「深度更正」即可修正。',
+  '> 贴正 Pastify 兼容所有 AI 平台的 Markdown 输出。执行后如仍有未渲染内容，点击「深度更正」即可修正。',
   '',
-  '希望这对你有帮助！如还有其他问题，请随时告诉我。'
+  '希望这对你有帮助！'
 ].join('\n')
 </script>
 </body>
