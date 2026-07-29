@@ -3,38 +3,34 @@ import type { StyleConfig } from './style'
 
 const marked = new Marked({ gfm: true, breaks: false })
 
-export function parseMarkdown(text: string, c: StyleConfig): string {
+export function parseMarkdown(text: string, c: StyleConfig): { html: string; style: string } {
   const blocks: string[] = []
 
-  // 1. Protect ```mermaid blocks from marked
   let src = text.replace(/```mermaid\n([\s\S]*?)```/g, (_, m) => {
     blocks.push(`<pre class="mermaid">${m.trim()}</pre>`)
-    return `␟BLOCK${blocks.length - 1}␟`
+    return `␟${blocks.length - 1}␟`
   })
 
-  // 2. Protect LaTeX ($$, $, \(...\), \[...\])
   src = src
-    .replace(/\\\[([\s\S]*?)\\\]/g, (_, m) => { blocks.push('$$' + m.trim() + '$$'); return `␟BLOCK${blocks.length - 1}␟` })
-    .replace(/\\\((.+?)\\\)/g,  (_, m) => { blocks.push('$' + m.trim() + '$');    return `␟BLOCK${blocks.length - 1}␟` })
-    .replace(/\$\$([\s\S]+?)\$\$/g,  (_, m) => { blocks.push('$$' + m.trim() + '$$'); return `␟BLOCK${blocks.length - 1}␟` })
-    .replace(/\$([^$]+?)\$/g,       (_, m) => { blocks.push('$' + m.trim() + '$');    return `␟BLOCK${blocks.length - 1}␟` })
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, m) => { blocks.push('$$' + m.trim() + '$$'); return `␟${blocks.length - 1}␟` })
+    .replace(/\\\((.+?)\\\)/g,  (_, m) => { blocks.push('$' + m.trim() + '$');    return `␟${blocks.length - 1}␟` })
+    .replace(/\$\$([\s\S]+?)\$\$/g,  (_, m) => { blocks.push('$$' + m.trim() + '$$'); return `␟${blocks.length - 1}␟` })
+    .replace(/\$([^$]+?)\$/g,       (_, m) => { blocks.push('$' + m.trim() + '$');    return `␟${blocks.length - 1}␟` })
 
   let html = marked.parse(src) as string
 
-  // 3. Restore all blocks
   for (let i = 0; i < blocks.length; i++) {
     let restored = blocks[i]
     if (restored.startsWith('<pre class="mermaid">')) {
-      // Raw mermaid — no HTML entity unescaping needed
+      // keep raw
     } else {
-      // LaTeX — unescape HTML entities
       restored = restored.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
         .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
     }
-    html = html.replace(`␟BLOCK${i}␟`, restored)
+    html = html.replace(`␟${i}␟`, restored)
   }
 
-  return `<style>${makeStyles(c)}</style><div class="doc">${html}</div>`
+  return { html, style: makeStyles(c) }
 }
 
 export function makeStyles(c: StyleConfig): string {

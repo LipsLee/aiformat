@@ -168,7 +168,8 @@ import { deepCorrect } from './src/deepfix.ts'
 
 var $=id=>document.getElementById(id)
 var inputArea=$('inputArea'),previewArea=$('preview'),floatBar=$('floatbar')
-var chkClean=$('chkClean'),toastEl=$('toast'),currentHtml=''
+var chkClean=$('chkClean'),toastEl=$('toast')
+var currentStyle='', hasContent=false
 
 // ===== APP =====
 function toast(m){ toastEl.textContent=m;toastEl.classList.add('on');setTimeout(function(){ toastEl.classList.remove('on') },1800) }
@@ -193,7 +194,6 @@ function renderMathAndDiagrams(){
     try {
       window.mermaid.run({ querySelector: '.doc pre.mermaid' }).catch(function(){})
     } catch(e) {
-      // Mermaid may not be loaded yet, retry after a delay
       setTimeout(function() {
         try { window.mermaid.run({ querySelector: '.doc pre.mermaid' }).catch(function(){}) } catch(e2) {}
       }, 500)
@@ -205,37 +205,33 @@ async function doFormat(){
   var raw=inputArea.value
   if (!raw.trim()) {
     previewArea.innerHTML='<span class="hint">在左侧粘贴 AI 回答<br/>点击「执行」开始格式化</span>'
-    currentHtml='';floatBar.classList.remove('on');return
+    currentStyle='';hasContent=false;floatBar.classList.remove('on');return
   }
   var src=chkClean.checked ? cleanAIPhrases(raw) : raw
-  currentHtml=parseMarkdown(src,getStyleConfig())
-  previewArea.innerHTML=currentHtml
+  var r=parseMarkdown(src,getStyleConfig())
+  currentStyle=r.style
+  previewArea.innerHTML='<style id="docstyle">'+r.style+'</style><div class="doc">'+r.html+'</div>'
   renderMathAndDiagrams()
-  floatBar.classList.add('on')
+  hasContent=true;floatBar.classList.add('on')
 }
 
 async function doDeepFix(){
-  if(!currentHtml) return toast('请先粘贴内容并点执行')
+  if(!hasContent) return toast('请先粘贴内容并点执行')
   var btn=$('btnDeep')
   btn.textContent='正在扫描...'
   btn.classList.add('loading')
-  await new Promise(function(r){ setTimeout(r, 50) }) // let UI update
+  await new Promise(function(r){ setTimeout(r, 50) })
 
   var docEl = previewArea.querySelector('.doc')
   if(!docEl) { btn.textContent='深度更正'; btn.classList.remove('loading'); return }
 
   var count = await deepCorrect(docEl)
 
-  // Update currentHtml from the fixed DOM
-  currentHtml = previewArea.innerHTML
-
   if(count>0){
-    btn.textContent='深度更正'
-    btn.classList.remove('loading')
+    btn.textContent='深度更正';btn.classList.remove('loading')
     toast('已修正 '+count+' 处未渲染的公式')
   } else {
-    btn.textContent='深度更正'
-    btn.classList.remove('loading')
+    btn.textContent='深度更正';btn.classList.remove('loading')
     toast('未发现需要修正的内容')
   }
 }
@@ -247,40 +243,52 @@ $('btnSample').addEventListener('click',function(){ inputArea.value=SAMPLE; doFo
 $('btnClear').addEventListener('click',function(){
   inputArea.value=''
   previewArea.innerHTML='<span class="hint">在左侧粘贴 AI 回答<br/>点击「执行」开始格式化</span>'
-  currentHtml='';floatBar.classList.remove('on')
+  currentStyle='';hasContent=false;floatBar.classList.remove('on')
 })
-chkClean.addEventListener('change',function(){ if(currentHtml) doFormat() })
+chkClean.addEventListener('change',function(){ if(hasContent) doFormat() })
+
+function getRenderedHtml(){
+  var docEl=previewArea.querySelector('.doc')
+  if(!docEl) return ''
+  return '<style>'+currentStyle+'</style><div class="doc">'+docEl.innerHTML+'</div>'
+}
+
+function getRenderedText(){
+  var docEl=previewArea.querySelector('.doc')
+  return docEl ? docEl.textContent||'' : ''
+}
 
 $('btnCopy').addEventListener('click',function(){
-  if(!currentHtml) return toast('请先粘贴内容并点执行')
-  copyRichText(currentHtml);toast('已复制，可粘贴到 Word / 飞书 / 微信')
+  if(!hasContent) return toast('请先粘贴内容并点执行')
+  copyRichText(getRenderedHtml(),currentStyle);toast('已复制，可粘贴到 Word / 飞书 / 微信')
 })
 $('btnCopyPlain').addEventListener('click',function(){
-  var t=previewArea.textContent&&previewArea.textContent.trim()
+  var t=getRenderedText().trim()
   if(!t) return toast('请先粘贴内容并点执行')
   copyPlainText(t);toast('已复制纯文本')
 })
 $('btnDocx').addEventListener('click',async function(){
-  if(!currentHtml) return toast('请先粘贴内容并点执行')
+  if(!hasContent) return toast('请先粘贴内容并点执行')
   try {
-    await downloadDocx(currentHtml,'贴正Pastify-输出.docx')
+    var docEl=previewArea.querySelector('.doc')
+    await downloadDocx(docEl,currentStyle,'贴正Pastify-输出.docx')
     toast('DOCX 下载中...')
   } catch(e) {
     toast('导出失败，请重试')
   }
 })
 $('btnPdf').addEventListener('click',function(){
-  if(!currentHtml) return toast('请先粘贴内容并点执行')
+  if(!hasContent) return toast('请先粘贴内容并点执行')
   window.print()
 });
 
 ['fontSize','lineHeight','paraSpacing'].forEach(function(id){
   $(id).addEventListener('input',function(){
     var el=document.getElementById(id+'Val');if(el) el.textContent=$(id).value
-    if(currentHtml) doFormat()
+    if(hasContent) doFormat()
   })
 })
-$('fontFamily').addEventListener('change',function(){ if(currentHtml) doFormat() })
+$('fontFamily').addEventListener('change',function(){ if(hasContent) doFormat() })
 
 var SAMPLE = [
   '# 多平台AI格式兼容性展示',
