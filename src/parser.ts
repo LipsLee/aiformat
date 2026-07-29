@@ -4,28 +4,34 @@ import type { StyleConfig } from './style'
 const marked = new Marked({ gfm: true, breaks: false })
 
 export function parseMarkdown(text: string, c: StyleConfig): string {
-  // === Placeholder strategy: isolate all LaTeX before marked touches it ===
   const blocks: string[] = []
 
-  // Collect all LaTeX blocks ($$...$$, $...$, \(...\), \[...\])
-  let src = text
-    .replace(/\\\[([\s\S]*?)\\\]/g, (_, m) => { blocks.push('$$' + m.trim() + '$$'); return `␟LATEX${blocks.length - 1}␟` })
-    .replace(/\\\((.+?)\\\)/g,  (_, m) => { blocks.push('$' + m.trim() + '$');    return `␟LATEX${blocks.length - 1}␟` })
-    .replace(/\$\$([\s\S]+?)\$\$/g,  (_, m) => { blocks.push('$$' + m.trim() + '$$'); return `␟LATEX${blocks.length - 1}␟` })
-    .replace(/\$([^$]+?)\$/g,       (_, m) => { blocks.push('$' + m.trim() + '$');    return `␟LATEX${blocks.length - 1}␟` })
+  // 1. Protect ```mermaid blocks from marked
+  let src = text.replace(/```mermaid\n([\s\S]*?)```/g, (_, m) => {
+    blocks.push(`<pre class="mermaid">${m.trim()}</pre>`)
+    return `␟BLOCK${blocks.length - 1}␟`
+  })
 
-  // Parse without LaTeX interference
+  // 2. Protect LaTeX ($$, $, \(...\), \[...\])
+  src = src
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, m) => { blocks.push('$$' + m.trim() + '$$'); return `␟BLOCK${blocks.length - 1}␟` })
+    .replace(/\\\((.+?)\\\)/g,  (_, m) => { blocks.push('$' + m.trim() + '$');    return `␟BLOCK${blocks.length - 1}␟` })
+    .replace(/\$\$([\s\S]+?)\$\$/g,  (_, m) => { blocks.push('$$' + m.trim() + '$$'); return `␟BLOCK${blocks.length - 1}␟` })
+    .replace(/\$([^$]+?)\$/g,       (_, m) => { blocks.push('$' + m.trim() + '$');    return `␟BLOCK${blocks.length - 1}␟` })
+
   let html = marked.parse(src) as string
 
-  // Restore placeholders — escape HTML entities that marked may have introduced
+  // 3. Restore all blocks
   for (let i = 0; i < blocks.length; i++) {
-    const restored = blocks[i]
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-    html = html.replace(`␟LATEX${i}␟`, restored)
+    let restored = blocks[i]
+    if (restored.startsWith('<pre class="mermaid">')) {
+      // Raw mermaid — no HTML entity unescaping needed
+    } else {
+      // LaTeX — unescape HTML entities
+      restored = restored.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    }
+    html = html.replace(`␟BLOCK${i}␟`, restored)
   }
 
   return `<style>${makeStyles(c)}</style><div class="doc">${html}</div>`
@@ -49,7 +55,8 @@ export function makeStyles(c: StyleConfig): string {
 .doc code{font-family:"SF Mono","Cascadia Code","JetBrains Mono",Consolas,monospace;font-size:.88em;background:#f2f1ef;padding:2px 6px;border-radius:3px;color:#c7254e;}
 .doc pre{margin:0.9em 0;padding:16px 20px;overflow-x:auto;background:#1e1e1e;border-radius:6px;}
 .doc pre code{font-size:.84em;line-height:1.55;color:#d4d4d4;background:none;padding:0;white-space:pre;}
-.doc pre.mermaid{background:#fafbfc;border:1px solid #e5e5e5;overflow-x:auto;text-align:center;color:#333;padding:12px 20px;}
+.doc pre.mermaid{background:#fafbfc;border:1px solid #e5e5e5;border-radius:8px;overflow-x:auto;text-align:center;color:#333;padding:16px 20px;display:flex;justify-content:center;}
+.doc pre.mermaid svg{max-width:100%;height:auto;}
 .doc .katex-display{margin:1em 0;overflow-x:auto;overflow-y:hidden;}
 .doc .katex{font-size:1.08em;}
 .doc table{width:100%;border-collapse:collapse;font-size:.92em;margin:0.9em 0;}

@@ -1,4 +1,4 @@
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx'
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, ImageRun } from 'docx'
 import { saveAs } from 'file-saver'
 import { makeStyles } from './parser'
 import { getStyleConfig } from './style'
@@ -41,24 +41,62 @@ export function copyPlainText(text: string): void {
   })
 }
 
+// ---- Mermaid → Image ----
+async function renderMermaidImage(code: string): Promise<Uint8Array | null> {
+  try {
+    const mermaid = (window as any).mermaid
+    if (!mermaid) return null
+    const id = 'mdocx-' + Math.random().toString(36).slice(2, 8)
+    const { svg } = await mermaid.render(id, code)
+
+    return new Promise(resolve => {
+      const img = new Image()
+      img.onload = () => {
+        const c = document.createElement('canvas')
+        c.width = img.width * 2; c.height = img.height * 2
+        const ctx = c.getContext('2d')!
+        ctx.scale(2, 2); ctx.drawImage(img, 0, 0)
+        c.toBlob(blob => {
+          if (blob) blob.arrayBuffer().then(buf => resolve(new Uint8Array(buf)))
+          else resolve(null)
+        }, 'image/png')
+      }
+      img.onerror = () => resolve(null)
+      img.src = 'data:image/svg+xml;base64,' + btoa(String.fromCharCode(...new TextEncoder().encode(svg)))
+    })
+  } catch {
+    return null
+  }
+}
+
+// ---- DOCX ----
 function txt(el: Element): string { return el.textContent || '' }
 
-function buildDocx(root: Element): (Paragraph | Table)[] {
+async function buildDocx(root: Element): Promise<(Paragraph | Table)[]> {
   const out: (Paragraph | Table)[] = []
   for (const el of Array.from(root.children)) {
     const tag = el.tagName.toLowerCase()
     if (tag === 'style') continue
 
     if (tag === 'pre' && el.classList.contains('mermaid')) {
-      out.push(new Paragraph({
-        children: [new TextRun({ text: '[流程图] ' + txt(el).slice(0, 120), italics: true, size: 20, color: '666666' })],
-        spacing: { after: 120 },
-        shading: { type: 'solid', color: 'fafbfc', fill: 'fafbfc' },
-      }))
+      const code = txt(el)
+      const imgData = await renderMermaidImage(code)
+      if (imgData) {
+        out.push(new Paragraph({
+          children: [new ImageRun({ data: imgData, transformation: { width: 500, height: 300 }, type: 'png' })],
+          spacing: { before: 120, after: 120 }, alignment: 'center',
+        }))
+      } else {
+        out.push(new Paragraph({
+          children: [new TextRun({ text: '[流程图] ' + code.slice(0, 120), italics: true, size: 20, color: '666666' })],
+          spacing: { after: 120 },
+          shading: { type: 'solid', color: 'fafbfc', fill: 'fafbfc' },
+        }))
+      }
       continue
     }
 
-    if (tag === 'div' && el.classList.contains('katex-display') || el.classList.contains('math-block')) {
+    if (tag === 'div' && (el.classList.contains('katex-display') || el.classList.contains('math-block'))) {
       out.push(new Paragraph({
         children: [new TextRun({ text: txt(el).slice(0, 200), font: 'Courier New', size: 20 })],
         spacing: { before: 120, after: 120 }, alignment: 'center',
@@ -133,16 +171,16 @@ function buildDocx(root: Element): (Paragraph | Table)[] {
       }))
       continue
     }
-    if (tag === 'div') out.push(...buildDocx(el))
+    if (tag === 'div') out.push(...(await buildDocx(el)))
   }
   return out
 }
 
-export function downloadDocx(html: string, filename: string): void {
+export async function downloadDocx(html: string, filename: string): Promise<void> {
   const div = document.createElement('div')
   div.innerHTML = html
   const root = div.querySelector('.doc') || div
-  const children = buildDocx(root)
+  const children = await buildDocx(root)
   const doc = new Document({
     sections: [{
       properties: {},
