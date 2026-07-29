@@ -253,9 +253,7 @@ $('btnCopy').addEventListener('click',function(){
   if(!hasContent) return toast('请先粘贴内容并点执行')
   var docEl=previewArea.querySelector('.doc')
   if(!docEl) return toast('找不到内容')
-  // Build self-contained HTML from the live rendered DOM (with Katex SVGs, Mermaid SVGs etc)
-  var fullHtml='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'+currentStyle+'</style></head><body><div class="doc">'+docEl.innerHTML+'</div></body></html>'
-  copyRichText(fullHtml,currentStyle)
+  copyRichText(docEl.innerHTML,currentStyle)
   toast('已复制 — 可粘贴到 Word / 飞书 / 微信')
 })
 
