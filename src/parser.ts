@@ -4,46 +4,31 @@ import type { StyleConfig } from './style'
 const marked = new Marked({ gfm: true, breaks: false })
 
 export function parseMarkdown(text: string, c: StyleConfig): string {
-  const prepped = preProcess(text)
-  const body = marked.parse(prepped) as string
-  return `<style>${makeStyles(c)}</style><div class="doc">${body}</div>`
-}
+  // === Placeholder strategy: isolate all LaTeX before marked touches it ===
+  const blocks: string[] = []
 
-function preProcess(text: string): string {
-  let out = text
+  // Collect all LaTeX blocks ($$...$$, $...$, \(...\), \[...\])
+  let src = text
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, m) => { blocks.push('$$' + m.trim() + '$$'); return `␟LATEX${blocks.length - 1}␟` })
+    .replace(/\\\((.+?)\\\)/g,  (_, m) => { blocks.push('$' + m.trim() + '$');    return `␟LATEX${blocks.length - 1}␟` })
+    .replace(/\$\$([\s\S]+?)\$\$/g,  (_, m) => { blocks.push('$$' + m.trim() + '$$'); return `␟LATEX${blocks.length - 1}␟` })
+    .replace(/\$([^$]+?)\$/g,       (_, m) => { blocks.push('$' + m.trim() + '$');    return `␟LATEX${blocks.length - 1}␟` })
 
-  // 1. Normalize \(...\) → $...$ (some AI platforms use this)
-  out = out.replace(/\\\(/g, '$').replace(/\\\)/g, '$')
-  // 2. Normalize \[...\] → $$...$$ (display math)
-  out = out.replace(/\\\[/g, '$$').replace(/\\\]/g, '$$')
-  // 3. Fix double-escaping: \\\( → \(  etc.
-  // (leave single-escaped as-is, they get handled by step 1+2 if re-run)
+  // Parse without LaTeX interference
+  let html = marked.parse(src) as string
 
-  // 4. Protect LaTeX underscores inside $...$ from markdown italics
-  //    Marked treats _text_ as italic. If _ is inside $...$, it's a subscript,
-  //    but marked may have already parse it. We protect by temporarily replacing.
-  //    Actually, marked's gfm mode handles this OK when _ is inside $.
-  //    But if the user's raw text has unmatched $, we help:
-  out = fixUnbalancedDollars(out)
+  // Restore placeholders — escape HTML entities that marked may have introduced
+  for (let i = 0; i < blocks.length; i++) {
+    const restored = blocks[i]
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+    html = html.replace(`␟LATEX${i}␟`, restored)
+  }
 
-  // 5. Convert \\( and \\) back to single \( and \)
-  out = out.replace(/\\\\\(/g, '\\(').replace(/\\\\\)/g, '\\)')
-
-  return out
-}
-
-function fixUnbalancedDollars(text: string): string {
-  // If there's an odd number of single $, try to pair them up
-  const lines = text.split('\n')
-  return lines.map(line => {
-    // Count $ that are not part of $$
-    const singleDollars = line.match(/(?<!\$)\$(?!\$)/g)
-    if (singleDollars && singleDollars.length % 2 !== 0) {
-      // Odd count — could be a broken formula. Leave alone, deep correct handles it.
-      return line
-    }
-    return line
-  }).join('\n')
+  return `<style>${makeStyles(c)}</style><div class="doc">${html}</div>`
 }
 
 export function makeStyles(c: StyleConfig): string {

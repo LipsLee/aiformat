@@ -1,4 +1,4 @@
-// Deep correction — walk DOM text nodes, find unrendered LaTeX, re-render
+// Deep correction — walk DOM text nodes, find mangled or unrendered LaTeX, re-render
 
 interface TextPatch {
   node: Text
@@ -22,9 +22,10 @@ export async function deepCorrect(root: Element): Promise<number> {
   }
 
   // Re-run KaTeX auto-render on the updated DOM
-  if ((window as any).renderMathInElement) {
+  const w = window as any
+  if (w.renderMathInElement) {
     try {
-      (window as any).renderMathInElement(root, {
+      w.renderMathInElement(root, {
         delimiters: [
           { left: '$$', right: '$$', display: true },
           { left: '$', right: '$', display: false },
@@ -57,7 +58,6 @@ function walk(node: Node, patches: TextPatch[]) {
     return
   }
 
-  // Skip already-rendered KaTeX nodes, code blocks, pre blocks, script, style
   if (node.nodeType !== Node.ELEMENT_NODE) return
   const el = node as Element
   const tag = el.tagName.toLowerCase()
@@ -65,8 +65,7 @@ function walk(node: Node, patches: TextPatch[]) {
     tag === 'script' || tag === 'style' ||
     el.classList.contains('katex') || el.classList.contains('katex-display') ||
     el.closest('.katex') || el.closest('pre') || el.closest('code') ||
-    el.closest('.math-block') || el.closest('.math-inline') ||
-    el.closest('[data-deep-fixed]')
+    el.closest('.mermaid') || el.closest('[data-deep-fixed]')
   ) return
 
   for (const child of Array.from(el.childNodes)) {
@@ -74,7 +73,7 @@ function walk(node: Node, patches: TextPatch[]) {
   }
 }
 
-const LATEX_SIGNAL = /\\frac|\\sum|\\int|\\prod|\\sqrt|\\alpha|\\beta|\\gamma|\\delta|\\epsilon|\\theta|\\lambda|\\mu|\\pi|\\sigma|\\omega|\\infty|\\partial|\\nabla|\\times|\\div|\\pm|\\cdot|\\leq|\\geq|\\neq|\\approx|\\equiv|\\rightarrow|\\Rightarrow|\\leftarrow|\\Leftarrow|\\subset|\\supset|\\in|\\notin|\\forall|\\exists|\\mathbb|\\mathbf|\\mathcal|\\text|\\begin|\\end|\\lim|\\log|\\ln|\\sin|\\cos|\\tan|\\det|\\max|\\min/
+const LATEX_SIGNAL = /\\frac|\\sum|\\int|\\prod|\\sqrt|\\alpha|\\beta|\\gamma|\\delta|\\epsilon|\\theta|\\lambda|\\mu|\\pi|\\sigma|\\omega|\\infty|\\partial|\\nabla|\\times|\\div|\\pm|\\cdot|\\leq|\\geq|\\neq|\\approx|\\equiv|\\rightarrow|\\Rightarrow|\\leftarrow|\\Leftarrow|\\subset|\\supset|\\in|\\notin|\\forall|\\exists|\\mathbb|\\mathbf|\\mathcal|\\text|\\begin|\\end|\\lim|\\log|\\ln|\\sin|\\cos|\\tan|\\det|\\max|\\min|\\bigg|\\Bigg|\\big|\\Big|\\hbar|\\hat|\\dot|\\ddot|\\widehat|\\overrightarrow|\\overleftarrow|\\mapsto|\\longrightarrow|\\longleftarrow|\\left|\\right|\\middle|\\langle|\\rangle|\\lVert|\\rVert|\\binom/
 
 function hasLatex(text: string): boolean {
   return LATEX_SIGNAL.test(text) || /\$[^$]+\$/.test(text) || /\$\$[\s\S]*?\$\$/.test(text) || /\\\(/.test(text) || /\\\[/.test(text)
@@ -83,19 +82,14 @@ function hasLatex(text: string): boolean {
 function parseMixedContent(text: string): (string | Element)[] {
   const parts: (string | Element)[] = []
 
-  // Build a regex that captures:
-  // - $$ ... $$ (block math)
-  // - $ ... $ (inline math)
-  // - \( ... \) (inline math)
-  // - \[ ... \] (block math)
-  // - Standalone \frac{...}{...} patterns (broken formulas)
+  // Regex captures:
+  // $$...$$ | $...$ | \(...\) | \[...\] | raw LaTeX fractions
   const pattern = /(\$\$[\s\S]+?\$\$)|(\$[^$]+\$)|(\\\(.+?\\\))|(\\\[[\s\S]+?\\\])/g
 
   let lastIndex = 0
-  let match = pattern.exec(text)
+  let match: RegExpExecArray | null
 
-  while (match) {
-    // Text before match
+  while ((match = pattern.exec(text)) !== null) {
     if (match.index > lastIndex) {
       parts.push(text.slice(lastIndex, match.index))
     }
@@ -120,12 +114,11 @@ function parseMixedContent(text: string): (string | Element)[] {
       } else {
         parts.push(raw)
         lastIndex = pattern.lastIndex
-        match = pattern.exec(text)
         continue
       }
 
       const katex = (window as any).katex
-      if (katex) {
+      if (katex && latex) {
         const span = document.createElement('span')
         span.setAttribute('data-deep-fixed', '1')
         span.innerHTML = katex.renderToString(latex, {
@@ -133,8 +126,13 @@ function parseMixedContent(text: string): (string | Element)[] {
           throwOnError: false,
           strict: false,
         })
-        span.classList.add(displayMode ? 'math-block' : 'math-inline')
-        if (displayMode) span.style.display = 'block'
+        if (displayMode) {
+          span.classList.add('math-block')
+          span.style.cssText = 'display:block;overflow-x:auto;padding:12px 0;text-align:center;'
+        } else {
+          span.classList.add('math-inline')
+          span.style.display = 'inline'
+        }
         parts.push(span)
       } else {
         parts.push(raw)
@@ -144,10 +142,8 @@ function parseMixedContent(text: string): (string | Element)[] {
     }
 
     lastIndex = pattern.lastIndex
-    match = pattern.exec(text)
   }
 
-  // Remaining text
   if (lastIndex < text.length) {
     parts.push(text.slice(lastIndex))
   }
