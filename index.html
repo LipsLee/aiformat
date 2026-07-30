@@ -253,7 +253,7 @@ $('btnCopy').addEventListener('click',function(){
   if(!hasContent) return toast('请先粘贴内容并点执行')
   var docEl=previewArea.querySelector('.doc')
   if(!docEl) return toast('找不到内容')
-  copyRichText(docEl.innerHTML,currentStyle)
+  copyRichText(docEl,currentStyle)
   toast('已复制 — 可粘贴到 Word / 飞书 / 微信')
 })
 
