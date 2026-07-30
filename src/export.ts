@@ -22,9 +22,9 @@ function buildClipboardData(docEl: Element, style: string): { html: string; plai
   copyOmmlRegistry.length = 0
   const clone = docEl.cloneNode(true) as Element
 
-  // === Build HTML: replace KaTeX with OMML markers, clean up Mermaid ===
-  // Remove KaTeX annotation elements (they contain raw LaTeX source)
-  clone.querySelectorAll('.katex annotation').forEach(a => a.remove())
+  // === Build HTML: replace KaTeX with OMML markers ===
+  // Step 1: Extract LaTeX from annotations and generate OMML BEFORE removing mathml.
+  // The annotation elements live inside .katex-mathml, so we must read them first.
 
   // Replace display math with OMML markers
   const displayBlocks = clone.querySelectorAll('.katex-display')
@@ -60,6 +60,12 @@ function buildClipboardData(docEl: Element, style: string): { html: string; plai
     }
   })
 
+  // Step 2: Now that LaTeX has been extracted, remove any remaining .katex-mathml
+  // (for formulas where OMML conversion failed and the original KaTeX HTML remains).
+  // .katex-mathml contains <math> MathML + <annotation> with raw LaTeX source —
+  // keeping it causes DUPLICATE formula text in both innerHTML and textContent.
+  clone.querySelectorAll('.katex-mathml').forEach(m => m.remove())
+
   // Clean Mermaid: remove SVG and inline styles
   clone.querySelectorAll('pre.mermaid svg').forEach(svg => svg.remove())
   clone.querySelectorAll('pre.mermaid style').forEach(s => s.remove())
@@ -87,8 +93,9 @@ function buildClipboardData(docEl: Element, style: string): { html: string; plai
 
   // === Build plain text: readable Unicode text ===
   const plainClone = docEl.cloneNode(true) as Element
-  // Remove annotations (raw LaTeX source)
-  plainClone.querySelectorAll('.katex annotation').forEach(a => a.remove())
+  // Remove KaTeX MathML layer (contains <math> + <annotation> with raw LaTeX)
+  // Only keep .katex-html which has Unicode math symbols (∫ ∑ α β)
+  plainClone.querySelectorAll('.katex-mathml').forEach(m => m.remove())
   // Remove Mermaid SVG and styles
   plainClone.querySelectorAll('pre.mermaid svg').forEach(svg => svg.remove())
   plainClone.querySelectorAll('pre.mermaid style').forEach(s => s.remove())
