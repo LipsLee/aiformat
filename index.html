@@ -70,7 +70,7 @@ body{
 #stylebar .grp input[type=range]{width:52px;height:3px;accent-color:#1a1a1a;cursor:pointer}
 #stylebar .grp .v{font-size:11px;color:#555;min-width:14px}
 
-#stage{flex:1;overflow:auto;padding:32px;display:flex;justify-content:center}
+#stage{flex:1;overflow:auto;padding:32px 32px 80px 32px;display:flex;justify-content:center}
 #preview{
   width:100%;max-width:760px;background:#fff;
   box-shadow:0 2px 8px rgba(0,0,0,.08);
@@ -179,29 +179,45 @@ var currentStyle='', hasContent=false
 function toast(m){ toastEl.textContent=m;toastEl.classList.add('on');setTimeout(function(){ toastEl.classList.remove('on') },1800) }
 
 function renderMathAndDiagrams(){
-  if (window.renderMathInElement) {
-    try {
-      window.renderMathInElement(previewArea, {
-        delimiters: [
-          {left: '$$', right: '$$', display: true},
-          {left: '$', right: '$', display: false},
-          {left: '\\(', right: '\\)', display: false},
-          {left: '\\[', right: '\\]', display: true},
-        ],
-        throwOnError: false
-      })
-    } catch(e) {}
-  }
-  if (window.mermaid) {
-    var mermaids = previewArea.querySelectorAll('.doc pre.mermaid')
-    if (mermaids.length) {
+  /* LaTeX is pre-rendered by parser.ts via katex.renderToString.
+     Fallback: if KaTeX wasn't available at parse time, raw $$ delimiters
+     remain in the DOM — auto-render them now. */
+  var docEl = previewArea.querySelector('.doc')
+  if (docEl && window.renderMathInElement) {
+    var rawLatex = docEl.innerHTML.match(/\$\$[\s\S]*?\$\$|\$[^$]+\$/)
+    if (rawLatex) {
       try {
-        window.mermaid.run({ nodes: mermaids }).catch(function(){})
-      } catch(e) {
-        setTimeout(function() {
-          try { window.mermaid.run({ nodes: previewArea.querySelectorAll('.doc pre.mermaid') }).catch(function(){}) } catch(e2) {}
-        }, 800)
+        window.renderMathInElement(docEl, {
+          delimiters: [
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false},
+          ],
+          throwOnError: false
+        })
+      } catch(e) {}
+    }
+  }
+
+  /* Mermaid — initialize once, then render with retry */
+  if (window.mermaid) {
+    try {
+      window.mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' })
+    } catch(e) {}
+    var mermaids = previewArea.querySelectorAll('.doc pre.mermaid:not([data-processed])')
+    if (mermaids.length) {
+      var renderMermaid = function(nodes) {
+        try {
+          window.mermaid.run({ nodes: nodes }).then(function() {
+            nodes.forEach(function(n) { n.setAttribute('data-processed', '1') })
+          }).catch(function(){})
+        } catch(e) {}
       }
+      renderMermaid(mermaids)
+      /* Retry once after a delay for late-loading Mermaid */
+      setTimeout(function() {
+        var retry = previewArea.querySelectorAll('.doc pre.mermaid:not([data-processed])')
+        if (retry.length) renderMermaid(retry)
+      }, 1200)
     }
   }
 }
@@ -259,19 +275,28 @@ $('btnCopy').addEventListener('click',function(){
 
 $('btnDocx').addEventListener('click',async function(){
   if(!hasContent) return toast('请先粘贴内容并点执行')
+  var btn = $('btnDocx')
+  var origText = btn.textContent
+  btn.textContent = '导出中...'
+  btn.disabled = true
   try {
     var docEl=previewArea.querySelector('.doc')
     if(!docEl) return toast('找不到内容')
-    await downloadDocx(docEl,currentStyle,'贴正Pastify-输出.docx')
+    await downloadDocx(docEl,currentStyle,'贴正Pastify-输出.docx',getStyleConfig())
     toast('DOCX 下载完成')
   } catch(e) {
+    console.error('DOCX export error:', e)
     toast('导出失败，请重试')
+  } finally {
+    btn.textContent = origText
+    btn.disabled = false
   }
 })
 
 $('btnPdf').addEventListener('click',function(){
   if(!hasContent) return toast('请先粘贴内容并点执行')
-  window.print()
+  /* Defer print() to prevent synchronous dialog from blocking UI updates */
+  setTimeout(function() { window.print() }, 150)
 });
 
 ['fontSize','lineHeight','paraSpacing'].forEach(function(id){
@@ -296,12 +321,15 @@ var SAMPLE = [
   '## 物理公式',
   '',
   '牛顿引力：$$F = G\\frac{m_1 m_2}{r^2}$$',
+  '',
   '麦克斯韦：$$\\nabla \\times \\mathbf{E} = -\\frac{\\partial \\mathbf{B}}{\\partial t}$$',
+  '',
   '薛定谔方程：$$i\\hbar\\frac{\\partial}{\\partial t}\\Psi = \\hat{H}\\Psi$$',
   '',
   '## 化学方程式',
   '',
   '电离平衡：$$K_w = [\\text{H}^+][\\text{OH}^-] = 1.0 \\times 10^{-14}$$',
+  '',
   '理想气体：$$PV = nRT$$',
   '',
   '## Mermaid 流程图',

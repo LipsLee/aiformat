@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite'
 
-export default defineConfig({
-  base: '/pastify/',
-})
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? '/pastify/' : '/',
+}))

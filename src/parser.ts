@@ -3,31 +3,59 @@ import type { StyleConfig } from './style'
 
 const marked = new Marked({ gfm: true, breaks: false })
 
+/**
+ * Parse Markdown → styled HTML. LaTeX formulas are pre-rendered with KaTeX
+ * (if available) to prevent double-rendering issues from auto-render.
+ */
 export function parseMarkdown(text: string, c: StyleConfig): { html: string; style: string } {
-  const blocks: string[] = []
+  const mermaidBlocks: string[] = []
+  const latexBlocks: { raw: string; display: boolean }[] = []
 
+  // Extract mermaid blocks first
   let src = text.replace(/```mermaid\n([\s\S]*?)```/g, (_, m) => {
-    blocks.push(`<pre class="mermaid">${m.trim()}</pre>`)
-    return `␟${blocks.length - 1}␟`
+    mermaidBlocks.push(`<pre class="mermaid">${m.trim()}</pre>`)
+    return `␟M${mermaidBlocks.length - 1}␟`
   })
 
+  // Extract LaTeX blocks (order matters: display before inline)
   src = src
-    .replace(/\\\[([\s\S]*?)\\\]/g, (_, m) => { blocks.push('$$' + m.trim() + '$$'); return `␟${blocks.length - 1}␟` })
-    .replace(/\\\((.+?)\\\)/g,  (_, m) => { blocks.push('$' + m.trim() + '$');    return `␟${blocks.length - 1}␟` })
-    .replace(/\$\$([\s\S]+?)\$\$/g,  (_, m) => { blocks.push('$$' + m.trim() + '$$'); return `␟${blocks.length - 1}␟` })
-    .replace(/\$([^$]+?)\$/g,       (_, m) => { blocks.push('$' + m.trim() + '$');    return `␟${blocks.length - 1}␟` })
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, m) => { latexBlocks.push({ raw: m.trim(), display: true  }); return `␟L${latexBlocks.length - 1}␟` })
+    .replace(/\\\((.+?)\\\)/g,  (_, m) => { latexBlocks.push({ raw: m.trim(), display: false }); return `␟L${latexBlocks.length - 1}␟` })
+    .replace(/\$\$([\s\S]+?)\$\$/g,  (_, m) => { latexBlocks.push({ raw: m.trim(), display: true  }); return `␟L${latexBlocks.length - 1}␟` })
+    .replace(/\$([^$]+?)\$/g,       (_, m) => { latexBlocks.push({ raw: m.trim(), display: false }); return `␟L${latexBlocks.length - 1}␟` })
 
+  // Parse with marked (sentinels are opaque Unicode that marked won't touch)
   let html = marked.parse(src) as string
 
-  for (let i = 0; i < blocks.length; i++) {
-    let restored = blocks[i]
-    if (restored.startsWith('<pre class="mermaid">')) {
-      // keep raw
+  // Restore mermaid blocks
+  for (let i = 0; i < mermaidBlocks.length; i++) {
+    html = html.replace(`␟M${i}␟`, mermaidBlocks[i])
+  }
+
+  // Restore LaTeX blocks — pre-render with KaTeX if available
+  const katex = (window as any).katex
+  for (let i = 0; i < latexBlocks.length; i++) {
+    const { raw, display } = latexBlocks[i]
+    let rendered: string
+
+    if (katex) {
+      try {
+        rendered = katex.renderToString(raw, {
+          displayMode: display,
+          throwOnError: false,
+          strict: false,
+          trust: true,
+        })
+      } catch {
+        // KaTeX render failed — fall back to raw delimited text
+        rendered = display ? `$$${raw}$$` : `$${raw}$`
+      }
     } else {
-      restored = restored.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+      // KaTeX not loaded yet — emit raw delimiters for fallback rendering
+      rendered = display ? `$$${raw}$$` : `$${raw}$`
     }
-    html = html.replace(`␟${i}␟`, restored)
+
+    html = html.replace(`␟L${i}␟`, rendered)
   }
 
   return { html, style: makeStyles(c) }

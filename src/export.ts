@@ -1,6 +1,14 @@
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, AlignmentType } from 'docx'
+import { Document, Packer, Paragraph, TextRun, ImageRun, HeadingLevel, Table, TableRow, TableCell, WidthType, AlignmentType } from 'docx'
 import { saveAs } from 'file-saver'
 import { latexToOmml, extractLatex, isKatexDisplay, isInsideKatex } from './latex2omml'
+import type { StyleConfig } from './style'
+
+function docxFont(cssFontFamily: string): string {
+  // Map CSS font-family values to docx-friendly Windows font names
+  if (cssFontFamily.includes('Songti') || cssFontFamily.includes('Noto Serif')) return 'SimSun'
+  if (cssFontFamily.includes('KaiTi') || cssFontFamily.includes('STKaiti')) return 'KaiTi'
+  return 'Microsoft YaHei'
+}
 
 // ---- COPY support ----
 
@@ -142,7 +150,6 @@ export function copyRichText(docEl: Element, style: string): void {
 
 // ---- DOCX export ----
 
-const H_SIZES: Record<string,number> = { h1:44, h2:36, h3:30, h4:26, h5:22, h6:20 }
 const H_LEVEL: Record<string,any> = {
   h1: HeadingLevel.HEADING_1, h2: HeadingLevel.HEADING_2,
   h3: HeadingLevel.HEADING_3, h4: HeadingLevel.HEADING_4,
@@ -151,9 +158,67 @@ const H_LEVEL: Record<string,any> = {
 
 function t(n: Node): string { return (n.textContent || '').trim() }
 
-// OMML placeholder marker — we insert this into the docx as text, then
-// post-process the zip to replace it with real OMML XML.
-const OMML_MARKER_PREFIX = '\uFEFF__OMML_'
+// ---- Mermaid SVG → PNG conversion ----
+
+interface MermaidEntry {
+  svg: SVGElement
+  fallbackText: string
+  paragraphIndex: number
+}
+
+let _mermaidEntries: MermaidEntry[] = []
+
+async function svgToPngBlob(svgElement: SVGElement): Promise<Blob> {
+  // Deep clone to avoid mutating the original DOM
+  const clone = svgElement.cloneNode(true) as SVGElement
+
+  // Strip <style> tags that may contain @import / @font-face referencing external URLs.
+  // External references taint the canvas, causing SecurityError on toBlob().
+  clone.querySelectorAll('style').forEach(s => s.remove())
+
+  // Ensure proper SVG namespace
+  if (!clone.getAttribute('xmlns')) {
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+  }
+
+  const svgData = new XMLSerializer().serializeToString(clone)
+  const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' })
+  const url = URL.createObjectURL(svgBlob)
+
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      const rect = svgElement.getBoundingClientRect()
+      const w = rect.width || img.naturalWidth || 600
+      const h = rect.height || img.naturalHeight || 400
+      const scale = 2
+      const canvas = document.createElement('canvas')
+      canvas.width = w * scale
+      canvas.height = h * scale
+      const ctx = canvas.getContext('2d')!
+      ctx.scale(scale, scale)
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, w, h)
+      try {
+        ctx.drawImage(img, 0, 0, w, h)
+        canvas.toBlob(blob => {
+          if (blob) resolve(blob)
+          else reject(new Error('canvas.toBlob returned null'))
+        }, 'image/png')
+      } catch (e) {
+        reject(new Error(`Canvas tainted or draw failed: ${e}`))
+      }
+    }
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(new Error(`SVG image load failed: ${e}`)) }
+    img.src = url
+  })
+}
+
+// OMML placeholder marker — pure ASCII to avoid XML encoding issues.
+// The docx library may encode non-ASCII chars as XML character references,
+// so we use a simple ASCII prefix that survives round-trip serialization.
+const OMML_MARKER_PREFIX = '__PASTIFY_OMML_'
 const ommlRegistry: string[] = []
 
 function registerOmml(omml: string): string {
@@ -162,19 +227,84 @@ function registerOmml(omml: string): string {
   return `${OMML_MARKER_PREFIX}${id}__`
 }
 
-export async function downloadDocx(docEl: Element, _style: string, filename: string): Promise<void> {
-  // Reset registry
-  ommlRegistry.length = 0
+function mermaidFallbackPara(entry: MermaidEntry): Paragraph {
+  return new Paragraph({
+    children: [new TextRun({ text: '[流程图] ' + entry.fallbackText.slice(0, 120), italics: true, size: 20, color: '666666' })],
+    spacing: { after: 120 },
+    shading: { type: 'solid', color: 'fafbfc', fill: 'fafbfc' },
+  })
+}
 
-  const children = walk(docEl)
+export async function downloadDocx(docEl: Element, _style: string, filename: string, cfg?: StyleConfig): Promise<void> {
+  // Reset registries
+  ommlRegistry.length = 0
+  _mermaidEntries = []
+
+  let children: (Paragraph | Table)[]
+  try {
+    children = walk(docEl, cfg)
+  } catch (e) {
+    console.error('[Pastify DOCX] walk() failed:', e)
+    throw new Error(`DOM walk 失败: ${e}`)
+  }
+
+  // Process Mermaid SVGs into ImageRun paragraphs
+  if (_mermaidEntries.length > 0) {
+    const pngResults = await Promise.allSettled(
+      _mermaidEntries.map(e => svgToPngBlob(e.svg).then(blob => ({ blob, entry: e })))
+    )
+    const replacements: Promise<void>[] = []
+    pngResults.forEach((result, i) => {
+      const entry = _mermaidEntries[i]
+      if (result.status === 'fulfilled') {
+        const { blob } = result.value
+        const svgEl = entry.svg
+        const rect = svgEl.getBoundingClientRect()
+        const w = rect.width || 600
+        const h = rect.height || 400
+        const maxW = 5500
+        const scale = Math.min(maxW / (w * 9525 / 72), 1)
+        replacements.push(
+          blob.arrayBuffer().then(buf => {
+            children[entry.paragraphIndex] = new Paragraph({
+              children: [new ImageRun({
+                type: 'png',
+                data: buf,
+                transformation: { width: Math.round(w * scale * 9525 / 72), height: Math.round(h * scale * 9525 / 72) },
+              })],
+              spacing: { before: 120, after: 120 },
+              alignment: AlignmentType.CENTER,
+            })
+          }).catch(() => {
+            children[entry.paragraphIndex] = mermaidFallbackPara(entry)
+          })
+        )
+      } else {
+        children[entry.paragraphIndex] = mermaidFallbackPara(entry)
+      }
+    })
+    await Promise.allSettled(replacements)
+  }
+
   const doc = new Document({
     sections: [{ properties: {}, children: children.length ? children : [new Paragraph({ children: [new TextRun('')] })] }],
   })
 
-  const blob = await Packer.toBlob(doc)
+  let blob: Blob
+  try {
+    blob = await Packer.toBlob(doc)
+  } catch (e) {
+    console.error('[Pastify DOCX] Packer.toBlob failed:', e)
+    throw new Error(`Packer.toBlob 失败: ${e}`)
+  }
 
-  // Post-process: replace OMML markers with actual OMML XML
-  const finalBlob = await replaceOmmlMarkers(blob)
+  let finalBlob: Blob
+  try {
+    finalBlob = await replaceOmmlMarkers(blob)
+  } catch (e) {
+    console.error('[Pastify DOCX] replaceOmmlMarkers failed:', e)
+    finalBlob = blob
+  }
 
   saveAs(finalBlob, filename)
 }
@@ -182,34 +312,98 @@ export async function downloadDocx(docEl: Element, _style: string, filename: str
 async function replaceOmmlMarkers(blob: Blob): Promise<Blob> {
   if (ommlRegistry.length === 0) return blob
 
-  const JSZip = (await import('jszip')).default
-  const zip = await JSZip.loadAsync(blob)
+  try {
+    const JSZip = (await import('jszip')).default
+    const zip = await JSZip.loadAsync(blob)
 
-  let docXml = await zip.file('word/document.xml')!.async('string')
+    const docFile = zip.file('word/document.xml')
+    if (!docFile) {
+      console.warn('Pastify: word/document.xml not found in docx zip')
+      return blob
+    }
 
-  // Ensure math namespace is declared
-  if (!docXml.includes('xmlns:m=')) {
-    docXml = docXml.replace(
-      /<w:document\s/,
-      '<w:document xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" '
-    )
+    let docXml = await docFile.async('string')
+
+    // Ensure math namespace is declared (required for OMML elements)
+    if (!docXml.includes('xmlns:m=')) {
+      docXml = docXml.replace(
+        /<w:document\s/,
+        '<w:document xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" '
+      )
+    }
+
+    // Use DOM parser to safely find and replace OMML markers
+    // Regex can span across w:r boundaries and consume adjacent text runs
+    const parser = new DOMParser()
+    const xmlDoc = parser.parseFromString(docXml, 'application/xml')
+
+    const parseError = xmlDoc.querySelector('parsererror')
+    if (parseError) {
+      console.warn('Pastify: XML parse error, document may be malformed')
+      // Fall back to regex as last resort
+      return replaceOmmlMarkersRegex(docXml, zip)
+    }
+
+    // Find all w:t elements whose text content is an OMML marker
+    const wtNodes = xmlDoc.querySelectorAll('w\\:t, t')
+    const replacements: { wr: Element; omml: string }[] = []
+
+    for (const wt of wtNodes) {
+      const text = wt.textContent || ''
+      const match = text.match(/^__PASTIFY_OMML_(\d+)__$/)
+      if (!match) continue
+      const idx = parseInt(match[1], 10)
+      if (idx >= ommlRegistry.length) continue
+
+      // Get the parent w:r element
+      const wr = wt.parentElement
+      if (!wr || (wr.tagName !== 'w:r' && wr.tagName !== 'r')) continue
+
+      replacements.push({ wr, omml: ommlRegistry[idx] })
+    }
+
+    // Replace each w:r with the OMML XML
+    for (const { wr, omml } of replacements) {
+      try {
+        const ommlDoc = parser.parseFromString(omml, 'application/xml')
+        const ommlEl = ommlDoc.documentElement
+        if (wr.parentElement) {
+          wr.parentElement.replaceChild(ommlEl, wr)
+        }
+      } catch (e) {
+        console.warn('Pastify: failed to inject OMML element:', e)
+      }
+    }
+
+    docXml = new XMLSerializer().serializeToString(xmlDoc)
+
+    zip.file('word/document.xml', docXml)
+
+    return zip.generateAsync({
+      type: 'blob',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      compression: 'DEFLATE'
+    })
+  } catch (err) {
+    console.error('Pastify: OMML post-processing failed, returning original blob:', err)
+    return blob
   }
+}
 
-  // Replace each marker with OMML XML
+// Regex fallback kept for XML parse error scenarios
+async function replaceOmmlMarkersRegex(docXml: string, zip: any): Promise<Blob> {
   for (let i = 0; i < ommlRegistry.length; i++) {
     const marker = `${OMML_MARKER_PREFIX}${i}__`
-    const omml = ommlRegistry[i]
-
-    const escapedMarker = marker.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')
-    const runRegex = new RegExp(
-      `<w:r[^>]*>(?:<w:rPr[^>]*(?:/>|>.*?</w:rPr>))?<w:t[^>]*>${escapedMarker}</w:t></w:r>`,
+    const esc = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const re = new RegExp(
+      `<w:r[^>]*>(?:<w:rPr[^>]*(?:/>|>.*?</w:rPr>))?<w:t[^>]*>${esc}</w:t></w:r>`,
       'gs'
     )
-    docXml = docXml.replace(runRegex, omml)
+    if (re.test(docXml)) {
+      docXml = docXml.replace(re, ommlRegistry[i])
+    }
   }
-
   zip.file('word/document.xml', docXml)
-
   return zip.generateAsync({
     type: 'blob',
     mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -217,12 +411,22 @@ async function replaceOmmlMarkers(blob: Blob): Promise<Blob> {
   })
 }
 
-function walk(el: Element): (Paragraph | Table)[] {
+function walk(el: Element, cfg?: StyleConfig): (Paragraph | Table)[] {
+  // Compute sizes dynamically from user-selected font size (px → docx half-points)
+  const baseHalfPt = Math.round((cfg?.fontSize || 16) * 1.5)
+  const H_SIZES: Record<string,number> = {
+    h1: Math.round(baseHalfPt * 1.55), h2: Math.round(baseHalfPt * 1.3),
+    h3: Math.round(baseHalfPt * 1.12), h4: Math.round(baseHalfPt * 1.05),
+    h5: Math.round(baseHalfPt * 1.05), h6: Math.round(baseHalfPt * 1.05),
+  }
+  const bodySize = baseHalfPt
+  const font = cfg ? docxFont(cfg.fontFamily) : 'Microsoft YaHei'
+
   const out: (Paragraph | Table)[] = []
   for (const n of Array.from(el.childNodes)) {
     if (n.nodeType === Node.COMMENT_NODE) continue
     if (n.nodeType === Node.TEXT_NODE) {
-      const s = t(n); if (s) out.push(para(s))
+      const s = t(n); if (s) out.push(para(s, bodySize, font))
       continue
     }
     if (n.nodeType !== Node.ELEMENT_NODE) continue
@@ -231,41 +435,65 @@ function walk(el: Element): (Paragraph | Table)[] {
 
     if (tag === 'style' || tag === 'script' || tag === 'svg') continue
 
-    // Mermaid pre
+    // Mermaid pre — capture SVG for ImageRun conversion
     if (tag === 'pre' && e.classList.contains('mermaid')) {
-      const s = t(e); if (s) out.push(new Paragraph({ children: [new TextRun({ text: '[流程图] ' + s.slice(0, 120), italics: true, size: 20, color: '666666' })], spacing: { after: 120 }, shading: { type: 'solid', color: 'fafbfc', fill: 'fafbfc' } }))
+      const svg = e.querySelector('svg')
+      const text = t(e)
+      if (svg) {
+        _mermaidEntries.push({ svg: svg as SVGElement, fallbackText: text, paragraphIndex: out.length })
+        out.push(new Paragraph({ children: [new TextRun({ text: '', size: 1 })], spacing: { after: 0 } }))
+      } else if (text) {
+        out.push(new Paragraph({ children: [new TextRun({ text: '[流程图] ' + text.slice(0, 120), italics: true, size: bodySize, color: '666666', font })], spacing: { after: 120 }, shading: { type: 'solid', color: 'fafbfc', fill: 'fafbfc' } }))
+      }
       continue
     }
 
     // Heading — may contain inline KaTeX
     if (H_SIZES[tag]) {
-      const runs = buildRunsWithMath(e, { bold: true, size: H_SIZES[tag] })
+      const runs = buildRunsWithMath(e, { bold: true, size: H_SIZES[tag], color: '000000', font })
       out.push(new Paragraph({ children: runs, heading: H_LEVEL[tag], spacing: { before: 400 - parseInt(tag[1])*50, after: 160 } }))
       continue
     }
 
     // Paragraph — may contain inline KaTeX
     if (tag === 'p') {
-      const runs = buildRunsWithMath(e, { size: 22 })
+      const runs = buildRunsWithMath(e, { size: bodySize, font })
       if (runs.length) {
         out.push(new Paragraph({ children: runs, spacing: { after: 120 } }))
       } else {
-        const s = t(e); if (s) out.push(para(s))
+        const s = t(e); if (s) out.push(para(s, bodySize, font))
       }
       continue
     }
 
-    // Code block
-    if (tag === 'pre') { const s = t(e); if (s) out.push(new Paragraph({ children: [new TextRun({ text: s, font: 'Courier New', size: 18 })], spacing: { after: 120 }, shading: { type: 'solid', color: '1e1e1e', fill: '1e1e1e' } })); continue }
+    // Code block — left-aligned, preserve indent, dark theme, no line numbers
+    if (tag === 'pre') {
+      const rawText = (e.textContent || '').replace(/^\n+|\n+$/g, '')
+      if (rawText) {
+        const lines = rawText.split('\n')
+        const runs: TextRun[] = []
+        lines.forEach((line, i) => {
+          runs.push(new TextRun({
+            text: line,
+            font: 'Courier New',
+            size: Math.max(16, bodySize - 4),
+            color: 'd4d4d4',
+            ...(i < lines.length - 1 ? { break: 1 as any } : {})
+          }))
+        })
+        out.push(new Paragraph({ children: runs, spacing: { after: 120 }, shading: { type: 'solid', color: '1e1e1e', fill: '1e1e1e' } }))
+      }
+      continue
+    }
 
     // Lists
     if (tag === 'ul' || tag === 'ol') {
       e.querySelectorAll(':scope > li').forEach(li => {
-        const runs = buildRunsWithMath(li as Element, { size: 22 })
+        const runs = buildRunsWithMath(li as Element, { size: bodySize, font })
         if (runs.length) {
           out.push(new Paragraph({ children: runs, spacing: { after: 80 }, bullet: { level: 0 } }))
         } else {
-          const s = t(li); if (s) out.push(new Paragraph({ children: [new TextRun({ text: s, size: 22 })], spacing: { after: 80 }, bullet: { level: 0 } }))
+          const s = t(li); if (s) out.push(new Paragraph({ children: [new TextRun({ text: s, size: bodySize, font })], spacing: { after: 80 }, bullet: { level: 0 } }))
         }
       })
       continue
@@ -273,11 +501,11 @@ function walk(el: Element): (Paragraph | Table)[] {
 
     // Blockquote
     if (tag === 'blockquote') {
-      const runs = buildRunsWithMath(e, { italics: true, size: 22 })
+      const runs = buildRunsWithMath(e, { italics: true, size: bodySize, font })
       if (runs.length) {
-        out.push(new Paragraph({ children: runs, spacing: { after: 120 }, indent: { left: 480 }, border: { left: { style: 'single', size: 10, color: 'ddd', space: 8 } } }))
+        out.push(new Paragraph({ children: runs, spacing: { after: 120 }, indent: { left: 480 }, border: { left: { style: 'single', size: 10, color: 'dddddd', space: 8 } } }))
       } else {
-        const s = t(e); if (s) out.push(new Paragraph({ children: [new TextRun({ text: s, italics: true, size: 22 })], spacing: { after: 120 }, indent: { left: 480 }, border: { left: { style: 'single', size: 10, color: 'ddd', space: 8 } } }))
+        const s = t(e); if (s) out.push(new Paragraph({ children: [new TextRun({ text: s, italics: true, size: bodySize, font })], spacing: { after: 120 }, indent: { left: 480 }, border: { left: { style: 'single', size: 10, color: 'dddddd', space: 8 } } }))
       }
       continue
     }
@@ -286,13 +514,14 @@ function walk(el: Element): (Paragraph | Table)[] {
     if (tag === 'table') {
       const trs = e.querySelectorAll('tr')
       const cols = Math.max(...Array.from(trs).map(tr => tr.querySelectorAll('th,td').length), 1)
+      const tdSize = Math.round(bodySize * 0.9)
       const rows: TableRow[] = []
       trs.forEach((tr, ri) => {
         const isHead = ri === 0 && !!tr.querySelector('th')
         rows.push(new TableRow({ children: Array.from(tr.querySelectorAll('th,td')).map(td => {
-          const runs = buildRunsWithMath(td as Element, { bold: isHead, size: 20 })
+          const runs = buildRunsWithMath(td as Element, { bold: isHead, size: tdSize, font })
           return new TableCell({
-            children: [new Paragraph({ children: runs.length ? runs : [new TextRun({ text: t(td), bold: isHead, size: 20 })] })],
+            children: [new Paragraph({ children: runs.length ? runs : [new TextRun({ text: t(td), bold: isHead, size: tdSize, font })] })],
             width: { size: Math.floor(8000/cols), type: WidthType.DXA },
             shading: isHead ? { type: 'solid', color: 'f5f4f0', fill: 'f5f4f0' } : undefined
           })
@@ -313,31 +542,31 @@ function walk(el: Element): (Paragraph | Table)[] {
           const omml = latexToOmml(latexInfo.latex, true)
           const marker = registerOmml(omml)
           out.push(new Paragraph({
-            children: [new TextRun({ text: marker, size: 22 })],
+            children: [new TextRun({ text: marker, size: bodySize, font })],
             spacing: { before: 80, after: 80 },
             alignment: AlignmentType.CENTER
           }))
         } catch {
-          const s = t(e); if (s) out.push(new Paragraph({ children: [new TextRun({ text: s, size: 22 })], spacing: { before: 80, after: 80 }, alignment: AlignmentType.CENTER }))
+          const s = t(e); if (s) out.push(new Paragraph({ children: [new TextRun({ text: s, size: bodySize, font })], spacing: { before: 80, after: 80 }, alignment: AlignmentType.CENTER }))
         }
       }
       continue
     }
 
     // Container — recurse
-    if (tag === 'div' || tag === 'section') { out.push(...walk(e)); continue }
+    if (tag === 'div' || tag === 'section') { out.push(...walk(e, cfg)); continue }
 
     // Skip KaTeX internals — already handled
     if (isInsideKatex(e)) continue
 
     // Fallback
-    const s = t(e); if (s) out.push(para(s))
+    const s = t(e); if (s) out.push(para(s, bodySize, font))
   }
   return out
 }
 
-function para(text: string): Paragraph {
-  return new Paragraph({ children: [new TextRun({ text, size: 22 })], spacing: { after: 120 } })
+function para(text: string, size?: number, font?: string): Paragraph {
+  return new Paragraph({ children: [new TextRun({ text, size: size || 22, font: font || 'Microsoft YaHei' })], spacing: { after: 120 } })
 }
 
 /**

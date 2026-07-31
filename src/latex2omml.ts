@@ -876,5 +876,5 @@ export function isKatexDisplay(el: Element): boolean {
  * Check if an element is inside KaTeX inline math
  */
 export function isInsideKatex(el: Element): boolean {
-  return el.closest('.katex') !== null
+  return el.parentElement?.closest('.katex') !== null
 }
